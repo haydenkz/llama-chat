@@ -287,7 +287,14 @@ private fun MessageList(
     modifier: Modifier = Modifier,
 ) {
     val listState = rememberLazyListState()
-    val reversed = remember(state.messages) { state.messages.asReversed() }
+    // Tool results are folded into the assistant's web-search card, so tool-role
+    // messages are not rendered as their own bubbles.
+    val toolResults = remember(state.messages) {
+        state.messages.filter { it.role == ChatRole.Tool }.associateBy { it.toolCallId.orEmpty() }
+    }
+    val reversed = remember(state.messages) {
+        state.messages.asReversed().filter { it.role != ChatRole.Tool }
+    }
     val lastAssistantId = remember(state.messages) {
         state.messages.lastOrNull { it.role == ChatRole.Assistant }?.id
     }
@@ -404,6 +411,7 @@ private fun MessageList(
             MessageBubble(
                 message = message,
                 canRegenerate = canRegenerate,
+                toolResults = toolResults,
                 onEdit = if (message.role == ChatRole.User) {
                     { onEdit(message) }
                 } else {
