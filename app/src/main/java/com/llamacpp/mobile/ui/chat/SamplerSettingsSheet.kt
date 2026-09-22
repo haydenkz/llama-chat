@@ -1,0 +1,174 @@
+package com.llamacpp.mobile.ui.chat
+
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.unit.dp
+import com.llamacpp.mobile.domain.model.SamplerSettings
+import com.llamacpp.mobile.ui.components.LabeledSwitch
+import com.llamacpp.mobile.ui.components.SamplerSlider
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun SamplerSettingsSheet(
+    settings: SamplerSettings,
+    onChange: (SamplerSettings) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    ModalBottomSheet(onDismissRequest = onDismiss) {
+        LazyColumn(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp),
+        ) {
+            item {
+                Text("System prompt", style = MaterialTheme.typography.titleSmall)
+                OutlinedTextField(
+                    value = settings.systemPrompt,
+                    onValueChange = { onChange(settings.copy(systemPrompt = it)) },
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
+                    minLines = 2,
+                    maxLines = 6,
+                    placeholder = { Text("You are a helpful assistant…") },
+                )
+                Spacer(Modifier.height(8.dp))
+            }
+
+            item {
+                SamplerSlider(
+                    title = "Temperature",
+                    value = settings.temperature,
+                    valueRange = 0f..2f,
+                    onChange = { onChange(settings.copy(temperature = it)) },
+                )
+            }
+            item {
+                SamplerSlider(
+                    title = "Top K",
+                    value = settings.topK.toFloat(),
+                    valueRange = 0f..200f,
+                    steps = 199,
+                    onChange = { onChange(settings.copy(topK = it.toInt())) },
+                )
+            }
+            item {
+                SamplerSlider(
+                    title = "Top P",
+                    value = settings.topP,
+                    valueRange = 0f..1f,
+                    onChange = { onChange(settings.copy(topP = it)) },
+                )
+            }
+            item {
+                SamplerSlider(
+                    title = "Min P",
+                    value = settings.minP,
+                    valueRange = 0f..1f,
+                    onChange = { onChange(settings.copy(minP = it)) },
+                )
+            }
+            item {
+                SamplerSlider(
+                    title = "Repeat penalty",
+                    value = settings.repeatPenalty,
+                    valueRange = 1f..2f,
+                    onChange = { onChange(settings.copy(repeatPenalty = it)) },
+                )
+            }
+            item {
+                SamplerSlider(
+                    title = "Presence penalty",
+                    value = settings.presencePenalty,
+                    valueRange = -2f..2f,
+                    onChange = { onChange(settings.copy(presencePenalty = it)) },
+                )
+            }
+            item {
+                SamplerSlider(
+                    title = "Frequency penalty",
+                    value = settings.frequencyPenalty,
+                    valueRange = -2f..2f,
+                    onChange = { onChange(settings.copy(frequencyPenalty = it)) },
+                )
+            }
+            item {
+                SamplerSlider(
+                    title = "Max tokens",
+                    value = settings.maxTokens.toFloat(),
+                    valueRange = 0f..32768f,
+                    onChange = { onChange(settings.copy(maxTokens = it.toInt())) },
+                )
+            }
+            item {
+                OutlinedTextField(
+                    value = settings.seed.toString(),
+                    onValueChange = { raw ->
+                        val parsed = raw.filter { it.isDigit() || it == '-' }.toIntOrNull() ?: -1
+                        onChange(settings.copy(seed = parsed))
+                    },
+                    label = { Text("Seed (-1 = random)") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                    singleLine = true,
+                )
+            }
+            item {
+                OutlinedTextField(
+                    value = settings.stop.joinToString("\n"),
+                    onValueChange = { raw ->
+                        onChange(settings.copy(stop = raw.split("\n").filter { it.isNotEmpty() }))
+                    },
+                    label = { Text("Stop sequences (one per line)") },
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                    minLines = 1,
+                    maxLines = 4,
+                )
+            }
+            item {
+                LabeledSwitch(
+                    title = "Show reasoning",
+                    description = "Request the model's thinking / reasoning content when supported.",
+                    checked = settings.reasoning,
+                    onCheckedChange = { onChange(settings.copy(reasoning = it)) },
+                )
+            }
+            item {
+                LabeledSwitch(
+                    title = "Cache prompt",
+                    description = "Reuse the KV cache between turns for faster replies.",
+                    checked = settings.cachePrompt,
+                    onCheckedChange = { onChange(settings.copy(cachePrompt = it)) },
+                )
+            }
+            item {
+                LabeledSwitch(
+                    title = "Web search",
+                    description = "Let the model call a built-in web_search tool for current information.",
+                    checked = settings.webSearch,
+                    onCheckedChange = { onChange(settings.copy(webSearch = it)) },
+                )
+            }
+            item {
+                OutlinedTextField(
+                    value = settings.jsonSchema,
+                    onValueChange = { onChange(settings.copy(jsonSchema = it)) },
+                    label = { Text("JSON schema (optional response format)") },
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
+                    minLines = 2,
+                    maxLines = 8,
+                )
+            }
+            item { Spacer(Modifier.height(48.dp)) }
+        }
+    }
+}

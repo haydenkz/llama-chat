@@ -1,0 +1,34 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="512"
+    android:viewportHeight="512">
+    <!-- Official llama.cpp logo (black), inset into the adaptive-icon safe zone. -->
+    <group
+        android:translateX="102.4"
+        android:translateY="102.4"
+        android:scaleX="0.6"
+        android:scaleY="0.6">
+        <group
+            android:translateX="10.24"
+            android:translateY="10.24"
+            android:scaleX="0.96"
+            android:scaleY="0.96">
+            <path
+                android:fillColor="#111111"
+                android:pathData="M244.95 8C215.233 8 187.774 23.8591 172.923 49.5999L95.6009 183.625C60.2162 244.959 104.481 321.6 175.29 321.6H208L316.977 132.708C348.959 77.2719 308.95 8 244.95 8ZM208 321.6H351.947C415.982 321.6 456.013 390.91 424.013 446.377C409.155 472.132 381.681 488 351.947 488H271.29C200.481 488 156.216 411.359 191.601 350.026L208 321.6Z" />
+            <path
+                android:fillColor="#111111"
+                android:pathData="M208 321.6H16L106.462 164.8L208 321.6Z" />
+            <path
+                android:fillColor="#111111"
+                android:pathData="M388.923 8L208 321.6L253.6 8H388.923Z" />
+            <path
+                android:fillColor="#111111"
+                android:pathData="M304 488H112L202.462 331.2L304 488Z" />
+            <path
+                android:fillColor="#111111"
+                android:pathData="M496 321.6H208L419.399 454.4L496 321.6Z" />
+        </group>
+    </group>
+</vector>
