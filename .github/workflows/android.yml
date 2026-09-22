@@ -23,8 +23,10 @@ jobs:
           distribution: temurin
           java-version: '21'
 
-      # The GitHub runner image already ships the Android SDK; just accept the
+      # The GitHub runner image already ships the Android SDK; accept the
       # licenses and install the platform/build-tools we compile against.
+      # API 37 (Android 17) is minor-versioned and published on the canary
+      # channel as `platforms;android-37.0`.
       # (android-actions/setup-android@v3 is unusable because it installs the
       # removed `tools` package.)
       - name: Set up Android SDK
@@ -35,12 +37,12 @@ jobs:
           echo "ANDROID_SDK_ROOT=$SDK_ROOT" >> "$GITHUB_ENV"
           SDKMANAGER="$(find "$SDK_ROOT/cmdline-tools" -name sdkmanager -type f 2>/dev/null | head -1)"
           echo "sdkmanager: $SDKMANAGER"
-          if [ -n "$SDKMANAGER" ]; then
-            yes | "$SDKMANAGER" --licenses > /dev/null 2>&1 || true
-            "$SDKMANAGER" "platform-tools" || true
-            "$SDKMANAGER" "platforms;android-37" "build-tools;36.0.0" \
-              || "$SDKMANAGER" --channel=3 "platforms;android-37" "build-tools;36.0.0"
-          fi
+          yes | "$SDKMANAGER" --licenses > /dev/null 2>&1 || true
+          "$SDKMANAGER" --channel=3 \
+            "platform-tools" \
+            "platforms;android-37.0" \
+            "build-tools;36.0.0"
+          yes | "$SDKMANAGER" --licenses > /dev/null 2>&1 || true
 
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
