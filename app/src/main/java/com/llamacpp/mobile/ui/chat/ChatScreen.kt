@@ -1,5 +1,8 @@
 package com.llamacpp.mobile.ui.chat
 
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
 import android.os.SystemClock
 import android.view.HapticFeedbackConstants
 import androidx.compose.foundation.clickable
@@ -48,6 +51,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -232,7 +236,6 @@ fun ChatScreen(
                 state = state,
                 onEdit = { editing = it },
                 onRegenerate = vm::regenerate,
-                onDelete = vm::deleteMessage,
                 onSelectModel = { showModelPicker = true },
                 modifier = Modifier.fillMaxSize().padding(padding),
             )
@@ -271,38 +274,76 @@ fun ChatScreen(
     }
 }
 
+/** A user bubble or a grouped assistant turn. */
+private sealed interface ChatItem {
+    data class User(val message: ChatMessage) : ChatItem
+    data class Assistant(val turn: AssistantTurn) : ChatItem
+}
+
 /**
- * Bottom-anchored list (`reverseLayout = true`) so streaming text growth keeps
- * the newest content pinned to the bottom without any per-token scroll calls —
- * that is what made the previous implementation jumpy. Scrolling up to read
- * older messages is never fought, matching ChatGPT.
+ * Groups consecutive assistant/tool messages into a single turn, keyed by the
+ * user message that started it, so thinking + tool calls + the answer render as
+ * one unit instead of separate bubbles.
  */
+private fun groupIntoTurns(messages: List<ChatMessage>): List<ChatItem> {
+    val out = ArrayList<ChatItem>()
+    var turnKey = -1L
+    var buffer = ArrayList<ChatMessage>()
+
+    fun flush() {
+        if (buffer.isNotEmpty()) {
+            out.add(ChatItem.Assistant(AssistantTurn(id = turnKey, messages = buffer.toList())))
+            buffer = ArrayList()
+        }
+    }
+
+    messages.forEach { message ->
+        when (message.role) {
+            ChatRole.System -> Unit
+            ChatRole.User -> {
+                flush()
+                turnKey = message.id
+                out.add(ChatItem.User(message))
+            }
+            else -> buffer.add(message)
+        }
+    }
+    flush()
+    return out
+}
+
 @Composable
 private fun MessageList(
     state: ChatUiState,
     onEdit: (ChatMessage) -> Unit,
     onRegenerate: () -> Unit,
-    onDelete: (ChatMessage) -> Unit,
     onSelectModel: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val context = LocalContext.current
     val listState = rememberLazyListState()
-    // Tool results are folded into the assistant's web-search card, so tool-role
-    // messages are not rendered as their own bubbles.
+
     val toolResults = remember(state.messages) {
         state.messages.filter { it.role == ChatRole.Tool }.associateBy { it.toolCallId.orEmpty() }
     }
-    val reversed = remember(state.messages) {
-        state.messages.asReversed().filter { it.role != ChatRole.Tool }
+
+    val displayItems: List<ChatItem> = remember(state.messages, state.isStreaming) {
+        val grouped = groupIntoTurns(state.messages)
+        if (state.isStreaming && grouped.lastOrNull() !is ChatItem.Assistant) {
+            val lastUserId = state.messages.lastOrNull { it.role == ChatRole.User }?.id ?: -1L
+            grouped + ChatItem.Assistant(AssistantTurn(id = lastUserId, messages = emptyList()))
+        } else {
+            grouped
+        }
     }
-    val lastAssistantId = remember(state.messages) {
-        state.messages.lastOrNull { it.role == ChatRole.Assistant }?.id
+    val reversed = remember(displayItems) { displayItems.asReversed() }
+    val lastItem = displayItems.lastOrNull()
+
+    val copyMessage: (ChatMessage) -> Unit = { message ->
+        val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+        clipboard.setPrimaryClip(ClipData.newPlainText("message", message.content))
     }
 
-    // Explicit follow intent. Default true; only turned off when the user ends a
-    // scroll gesture while not at the bottom. A stray layout shift that leaves us
-    // scrolled up therefore does NOT disable following, so we recover to the
-    // bottom on the next token.
     var autoFollow by remember { mutableStateOf(true) }
     LaunchedEffect(listState) {
         var wasScrolling = false
@@ -316,7 +357,6 @@ private fun MessageList(
         }
     }
 
-    // When the user sends (or generation starts), snap smoothly to the newest.
     LaunchedEffect(state.messages.size, state.isStreaming) {
         if (state.isStreaming || state.messages.lastOrNull()?.role == ChatRole.User) {
             autoFollow = true
@@ -324,10 +364,8 @@ private fun MessageList(
         }
     }
 
-    // `reverseLayout` keeps the newest content pinned to the bottom on its own, so
-    // we do not scroll per token (that fought the layout and caused jitter). We
-    // only nudge once when generation finishes, because the transient bubble is
-    // swapped for the persisted message and the reasoning block collapses.
+    // `reverseLayout` keeps the newest content pinned on its own; we only nudge
+    // once when generation finishes (transient bubble → persisted message).
     LaunchedEffect(state.isStreaming) {
         if (!state.isStreaming && autoFollow) {
             listState.requestScrollToItem(0)
@@ -375,51 +413,30 @@ private fun MessageList(
         modifier = modifier,
         contentPadding = PaddingValues(vertical = 8.dp),
     ) {
-        // index 0 is the visual bottom
-        if (state.isStreaming && state.toolActivity != null) {
-            item(key = "tool-activity") {
-                Row(
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(10.dp),
-                ) {
-                    CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
-                    Text(
-                        text = state.toolActivity.orEmpty(),
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        items(reversed, key = { item ->
+            when (item) {
+                is ChatItem.User -> "u${item.message.id}"
+                is ChatItem.Assistant -> "t${item.turn.id}"
+            }
+        }) { item ->
+            when (item) {
+                is ChatItem.User -> UserBubble(item.message)
+
+                is ChatItem.Assistant -> {
+                    val isLast = item === lastItem
+                    AssistantTurnView(
+                        turn = item.turn,
+                        toolResults = toolResults,
+                        isStreaming = isLast && state.isStreaming,
+                        streamingContent = if (isLast && state.isStreaming) state.streamContent else "",
+                        streamingReasoning = if (isLast && state.isStreaming) state.streamReasoning else "",
+                        listState = listState,
+                        canRegenerate = isLast && !state.isStreaming,
+                        onCopy = copyMessage,
+                        onRegenerate = onRegenerate,
                     )
                 }
             }
-        }
-
-        if (state.isStreaming) {
-            item(key = "streaming") {
-                MessageBubble(
-                    message = ChatMessage(
-                        role = ChatRole.Assistant,
-                        content = state.streamContent,
-                        reasoning = state.streamReasoning,
-                    ),
-                    isStreaming = true,
-                )
-            }
-        }
-
-        items(reversed, key = { it.id }) { message ->
-            val canRegenerate = message.id == lastAssistantId
-            MessageBubble(
-                message = message,
-                canRegenerate = canRegenerate,
-                toolResults = toolResults,
-                onEdit = if (message.role == ChatRole.User) {
-                    { onEdit(message) }
-                } else {
-                    null
-                },
-                onRegenerate = if (canRegenerate) onRegenerate else null,
-                onDelete = { onDelete(message) },
-            )
         }
 
         if (state.serverOnline == false) {

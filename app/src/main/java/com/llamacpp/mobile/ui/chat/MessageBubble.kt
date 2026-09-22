@@ -1,14 +1,18 @@
 package com.llamacpp.mobile.ui.chat
 
-import android.content.ClipData
-import android.content.ClipboardManager
+import android.content.Intent
 import android.content.Context
 import android.graphics.BitmapFactory
+import android.net.Uri
 import android.util.Base64
+import androidx.compose.animation.core.animate
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -18,16 +22,19 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.lazy.LazyListState
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ContentCopy
-import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.outlined.Psychology
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -36,20 +43,27 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import coil3.SingletonImageLoader
 import coil3.compose.AsyncImage
+import coil3.request.ImageRequest
 import com.llamacpp.mobile.domain.model.ChatMessage
 import com.llamacpp.mobile.domain.model.ChatRole
 import com.llamacpp.mobile.domain.model.ToolCall
@@ -57,130 +71,30 @@ import com.llamacpp.mobile.ui.components.MarkdownText
 import com.llamacpp.mobile.ui.components.StreamingMarkdownText
 import com.llamacpp.mobile.ui.util.formatDuration
 import com.llamacpp.mobile.ui.util.formatSpeed
+import kotlinx.coroutines.delay
+
+/** A run of assistant/tool messages between two user messages. */
+data class AssistantTurn(
+    val id: Long,
+    val messages: List<ChatMessage>,
+)
 
 @Composable
-fun MessageBubble(
-    message: ChatMessage,
-    isStreaming: Boolean = false,
-    canRegenerate: Boolean = false,
-    toolResults: Map<String, ChatMessage> = emptyMap(),
-    onCopy: () -> Unit = {},
-    onEdit: (() -> Unit)? = null,
-    onRegenerate: (() -> Unit)? = null,
-    onDelete: () -> Unit = {},
-    modifier: Modifier = Modifier,
-) {
-    val context = LocalContext.current
-    val copy: () -> Unit = {
-        val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-        clipboard.setPrimaryClip(ClipData.newPlainText("message", message.content))
-        onCopy()
-    }
-
-    if (message.role == ChatRole.Tool) return
-
-    if (message.role == ChatRole.User) {
-        Row(modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp)) {
-            Spacer(Modifier.weight(1f))
-            Surface(
-                shape = RoundedCornerShape(16.dp),
-                color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                contentColor = MaterialTheme.colorScheme.onSurface,
-                modifier = Modifier.widthIn(max = 320.dp),
-            ) {
-                Column(Modifier.padding(horizontal = 14.dp, vertical = 10.dp)) {
-                    message.images.forEach { uri ->
-                        DataUriImage(uri, Modifier.fillMaxWidth().padding(bottom = 6.dp))
-                    }
-                    if (message.content.isNotBlank()) {
-                        Text(text = message.content, style = MaterialTheme.typography.bodyLarge)
-                    }
+fun UserBubble(message: ChatMessage, modifier: Modifier = Modifier) {
+    Row(modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp)) {
+        Spacer(Modifier.weight(1f))
+        Surface(
+            shape = RoundedCornerShape(16.dp),
+            color = MaterialTheme.colorScheme.surfaceContainerHigh,
+            contentColor = MaterialTheme.colorScheme.onSurface,
+            modifier = Modifier.widthIn(max = 320.dp),
+        ) {
+            Column(Modifier.padding(horizontal = 14.dp, vertical = 10.dp)) {
+                message.images.forEach { uri ->
+                    DataUriImage(uri, Modifier.fillMaxWidth().padding(bottom = 6.dp))
                 }
-            }
-        }
-        return
-    }
-
-    Column(modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp)) {
-        message.toolCalls.forEach { call ->
-            WebSearchCard(call = call, result = toolResults[call.id] ?: toolResults[call.id.ifBlank { "" }])
-        }
-
-        if (message.reasoning.isNotBlank()) {
-            ReasoningBlock(reasoning = message.reasoning, streaming = isStreaming)
-        }
-
-        when {
-            isStreaming -> {
-                if (message.content.isNotEmpty()) {
-                    StreamingMarkdownText(
-                        content = message.content,
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                }
-            }
-
-            message.content.isNotBlank() -> {
-                MarkdownText(content = message.content, modifier = Modifier.fillMaxWidth())
-            }
-        }
-
-        if (message.error != null) {
-            if (message.content.isNotBlank()) Spacer(Modifier.height(4.dp))
-            Text(
-                text = message.error,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.error,
-            )
-        }
-
-        val stats = remember(message) {
-            buildList {
-                message.model?.let { add(it) }
-                message.tokenCount?.let { add("$it tokens") }
-                message.durationMs?.let { add(formatDuration(it)) }
-                message.tokensPerSecond?.let { add(formatSpeed(it)) }
-            }
-        }
-        val isToolOnly = message.content.isBlank() && message.reasoning.isBlank() &&
-            message.toolCalls.isNotEmpty()
-
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            if (!isStreaming && !isToolOnly && stats.isNotEmpty()) {
-                Text(
-                    text = stats.joinToString("  ·  "),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f),
-                )
-            } else {
-                Spacer(Modifier.weight(1f))
-            }
-            if (!isStreaming && !isToolOnly && message.content.isNotBlank()) {
-                IconButton(onClick = copy, modifier = Modifier.size(34.dp)) {
-                    Icon(Icons.Default.ContentCopy, "Copy", Modifier.size(16.dp))
-                }
-            }
-            if (canRegenerate && onRegenerate != null && !isStreaming) {
-                IconButton(onClick = onRegenerate, modifier = Modifier.size(34.dp)) {
-                    Icon(Icons.Default.Refresh, "Regenerate", Modifier.size(18.dp))
-                }
-            }
-            if (onEdit != null && !isStreaming) {
-                IconButton(onClick = onEdit, modifier = Modifier.size(34.dp)) {
-                    Icon(Icons.Default.Edit, "Edit", Modifier.size(16.dp))
-                }
-            }
-            if (!isStreaming) {
-                IconButton(onClick = onDelete, modifier = Modifier.size(34.dp)) {
-                    Icon(
-                        Icons.Default.Delete,
-                        "Delete",
-                        Modifier.size(16.dp),
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
+                if (message.content.isNotBlank()) {
+                    Text(text = message.content, style = MaterialTheme.typography.bodyLarge)
                 }
             }
         }
@@ -188,139 +102,141 @@ fun MessageBubble(
 }
 
 /**
- * A single web-search card. Collapsed it shows the query, a result count and the
- * result favicons; tapping it expands the full results inline — instead of a
- * separate call card, stats line and results bubble.
+ * Renders a whole assistant turn as three clearly separated zones:
+ * a single merged **thinking** block, any **tool calls**, then the **answer**
+ * (with the stats/actions row only once the answer is complete). This keeps
+ * thinking from being split across tool iterations and keeps the generated
+ * answer distinct from the tool plumbing.
  */
 @Composable
-private fun WebSearchCard(call: ToolCall, result: ChatMessage?) {
-    val query = remember(call.arguments) { toolArgument(call.arguments, "query") }
-    val resultText = result?.content
-    val hosts = remember(resultText) { resultText?.let(::extractHosts).orEmpty() }
-    val resultCount = remember(resultText) { resultText?.let(::countResults) ?: 0 }
-    var expanded by remember { mutableStateOf(false) }
+fun AssistantTurnView(
+    turn: AssistantTurn,
+    toolResults: Map<String, ChatMessage>,
+    isStreaming: Boolean,
+    streamingContent: String,
+    streamingReasoning: String,
+    listState: LazyListState?,
+    canRegenerate: Boolean,
+    onCopy: (ChatMessage) -> Unit,
+    onRegenerate: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val thinking = remember(turn.messages, streamingReasoning) {
+        buildList {
+            turn.messages.forEach { if (it.reasoning.isNotBlank()) add(it.reasoning) }
+            if (streamingReasoning.isNotBlank()) add(streamingReasoning)
+        }.joinToString("\n\n")
+    }
+    val toolCalls = remember(turn.messages) { turn.messages.flatMap { it.toolCalls } }
+    val answer = remember(turn.messages) { turn.messages.lastOrNull { it.content.isNotBlank() } }
+    val error = remember(turn.messages) { turn.messages.firstNotNullOfOrNull { it.error } }
+    val answerText = if (isStreaming) streamingContent else answer?.content.orEmpty()
 
-    Surface(
-        shape = RoundedCornerShape(12.dp),
-        color = MaterialTheme.colorScheme.surfaceContainer,
-        contentColor = MaterialTheme.colorScheme.onSurface,
-        modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clickable(enabled = resultText != null) { expanded = !expanded }
-                .padding(horizontal = 12.dp, vertical = 10.dp),
-        ) {
+    Column(modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp)) {
+        if (thinking.isNotBlank()) {
+            ThinkingBlock(
+                reasoning = thinking,
+                streaming = isStreaming && answerText.isBlank(),
+            )
+        }
+
+        if (toolCalls.isNotEmpty()) {
+            WebSearchCard(
+                calls = toolCalls.map { call -> call to toolResults[call.id] },
+                listState = listState,
+            )
+        }
+
+        if (isStreaming && answerText.isEmpty() && thinking.isBlank() && toolCalls.isEmpty()) {
             Row(
+                modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
             ) {
-                Icon(
-                    Icons.Default.Search,
-                    contentDescription = null,
-                    modifier = Modifier.size(16.dp),
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                Column(Modifier.weight(1f)) {
-                    Text(
-                        text = "Web search",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    if (query.isNotBlank()) {
-                        Text(
-                            text = query,
-                            style = MaterialTheme.typography.bodyMedium,
-                            maxLines = if (expanded) 3 else 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                    }
-                }
-                if (resultText == null) {
-                    CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
-                } else {
-                    if (resultCount > 0) {
-                        Text(
-                            text = "$resultCount",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                    Text(
-                        text = if (expanded) "▾" else "▸",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-            }
-
-            if (resultText != null && !expanded && hosts.isNotEmpty()) {
-                Spacer(Modifier.height(8.dp))
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    hosts.take(6).forEach { host ->
-                        Favicon(host)
-                    }
-                }
-            }
-
-            if (resultText != null && expanded) {
-                Spacer(Modifier.height(8.dp))
+                CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
                 Text(
-                    text = resultText,
-                    style = MaterialTheme.typography.bodySmall,
+                    text = "Thinking…",
+                    style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+            }
+        }
+
+        when {
+            isStreaming && answerText.isNotEmpty() -> {
+                StreamingMarkdownText(content = answerText, modifier = Modifier.fillMaxWidth())
+            }
+            answerText.isNotEmpty() -> {
+                MarkdownText(content = answerText, modifier = Modifier.fillMaxWidth())
+            }
+        }
+
+        if (error != null) {
+            if (answerText.isNotEmpty()) Spacer(Modifier.height(4.dp))
+            Text(
+                text = error,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.error,
+            )
+        }
+
+        // Stats + actions only once the answer is finished.
+        if (!isStreaming && answer != null) {
+            AnswerActions(
+                message = answer,
+                canRegenerate = canRegenerate,
+                onCopy = { onCopy(answer) },
+                onRegenerate = onRegenerate,
+            )
+        }
+    }
+}
+
+@Composable
+private fun AnswerActions(
+    message: ChatMessage,
+    canRegenerate: Boolean,
+    onCopy: () -> Unit,
+    onRegenerate: () -> Unit,
+) {
+    val stats = remember(message) {
+        buildList {
+            message.model?.let { add(it) }
+            message.tokenCount?.let { add("$it tokens") }
+            message.durationMs?.let { add(formatDuration(it)) }
+            message.tokensPerSecond?.let { add(formatSpeed(it)) }
+        }
+    }
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        if (stats.isNotEmpty()) {
+            Text(
+                text = stats.joinToString("  ·  "),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f),
+            )
+        } else {
+            Spacer(Modifier.weight(1f))
+        }
+        if (message.content.isNotBlank()) {
+            IconButton(onClick = onCopy, modifier = Modifier.size(34.dp)) {
+                Icon(Icons.Default.ContentCopy, "Copy", Modifier.size(16.dp))
+            }
+        }
+        if (canRegenerate) {
+            IconButton(onClick = onRegenerate, modifier = Modifier.size(34.dp)) {
+                Icon(Icons.Default.Refresh, "Regenerate", Modifier.size(18.dp))
             }
         }
     }
 }
 
 @Composable
-private fun Favicon(host: String) {
-    AsyncImage(
-        model = "https://icons.duckduckgo.com/ip3/$host.ico",
-        contentDescription = host,
-        modifier = Modifier
-            .size(18.dp)
-            .clip(CircleShape)
-            .background(MaterialTheme.colorScheme.surfaceVariant),
-    )
-}
-
-/** Extracts distinct hosts from the "…\n<url>\n…" lines of a search result. */
-private fun extractHosts(text: String): List<String> =
-    text.lineSequence()
-        .map { it.trim() }
-        .filter { it.startsWith("http://") || it.startsWith("https://") }
-        .mapNotNull { runCatching { java.net.URI(it).host?.removePrefix("www.") }.getOrNull() }
-        .distinct()
-        .toList()
-
-private fun countResults(text: String): Int =
-    Regex("(?m)^\\d+\\.\\s").findAll(text).count()
-
-/** Best-effort extraction of an argument from a JSON-ish tool-call arguments string. */
-private fun toolArgument(arguments: String, key: String): String {
-    val match = Regex("\"$key\"\\s*:\\s*\"((?:\\\\.|[^\"\\\\])*)\"").find(arguments)
-    return match?.groupValues?.get(1)
-        ?.replace("\\\"", "\"")
-        ?.replace("\\\\", "\\")
-        .orEmpty()
-        .ifBlank { arguments.trim().trim('{', '}', ' ') }
-}
-
-@Composable
-private fun ReasoningBlock(reasoning: String, streaming: Boolean) {
+private fun ThinkingBlock(reasoning: String, streaming: Boolean) {
     var expanded by remember { mutableStateOf(streaming) }
     var userToggled by remember { mutableStateOf(false) }
-
-    // Stay fully expanded for the whole generation so the block never collapses
-    // mid-stream (that height collapse was yanking the scroll position). It
-    // collapses once the response is complete, or when the user toggles it.
     LaunchedEffect(streaming) {
         if (!userToggled) expanded = streaming
     }
@@ -370,6 +286,326 @@ private fun ReasoningBlock(reasoning: String, streaming: Boolean) {
             }
         }
     }
+}
+
+private data class SearchResult(val title: String, val url: String, val snippet: String) {
+    val host: String get() = runCatching { java.net.URI(url).host?.removePrefix("www.") }.getOrNull().orEmpty()
+}
+
+private data class SearchSection(
+    val query: String,
+    val raw: String?,
+    val results: List<SearchResult>,
+)
+
+/**
+ * One card for a whole turn's web searches (a model may issue several calls in a
+ * single response). Collapsed: the queries + result favicons. Expanded: the
+ * results, grouped per query, grown downward.
+ */
+@Composable
+private fun WebSearchCard(calls: List<Pair<ToolCall, ChatMessage?>>, listState: LazyListState?) {
+    val sections = calls.map { (call, result) ->
+        SearchSection(
+            query = toolArgument(call.arguments, "query").ifBlank { "search" },
+            raw = result?.content,
+            results = result?.content?.let(::parseSearchResults).orEmpty(),
+        )
+    }
+    val ready = sections.all { it.raw != null }
+    val hosts = sections.flatMap { it.results }.map { it.host }.filter { it.isNotBlank() }.distinct()
+    val queryLine = sections.joinToString("   ·   ") { it.query }
+    var expanded by remember { mutableStateOf(false) }
+
+    val density = LocalDensity.current
+    val heightPx = remember { mutableFloatStateOf(0f) }
+    var contentHeightPx by remember { mutableStateOf(0) }
+    val maxHeightPx = with(density) { 360.dp.toPx() }
+
+    LaunchedEffect(expanded) {
+        val target = if (expanded) minOf(contentHeightPx.toFloat(), maxHeightPx) else 0f
+        animate(
+            initialValue = heightPx.floatValue,
+            targetValue = target,
+            animationSpec = tween(durationMillis = 260),
+        ) { value, _ ->
+            val delta = value - heightPx.floatValue
+            heightPx.floatValue = value
+            // The list is reverse-laid-out, so a taller item would push everything
+            // above it up. Nudge the scroll by the same delta each frame to keep
+            // the header pinned and let the results grow downward.
+            if (delta != 0f) listState?.dispatchRawDelta(delta)
+        }
+    }
+
+    Surface(
+        shape = RoundedCornerShape(12.dp),
+        color = MaterialTheme.colorScheme.surfaceContainer,
+        contentColor = MaterialTheme.colorScheme.onSurface,
+        modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
+    ) {
+        Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp)) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable(enabled = ready) { expanded = !expanded },
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Icon(
+                    Icons.Default.Search,
+                    contentDescription = null,
+                    modifier = Modifier.size(16.dp),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        text = if (calls.size > 1) "Web search · ${calls.size}" else "Web search",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    if (queryLine.isNotBlank()) {
+                        Text(
+                            text = queryLine,
+                            style = MaterialTheme.typography.bodyMedium,
+                            maxLines = if (expanded) 3 else 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                }
+                if (!ready) {
+                    CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
+                } else {
+                    Text(
+                        text = if (expanded) "Hide" else "Show",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+
+            if (ready && !expanded && hosts.isNotEmpty()) {
+                Spacer(Modifier.height(10.dp))
+                FaviconRow(hosts)
+            }
+
+            if (ready) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(with(density) { heightPx.floatValue.toDp() })
+                        .clipToBounds(),
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .verticalScroll(rememberScrollState()),
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(top = 6.dp)
+                                .onSizeChanged { contentHeightPx = it.height },
+                        ) {
+                            sections.forEachIndexed { sectionIndex, section ->
+                                if (sections.size > 1 && sectionIndex > 0) {
+                                    HorizontalDivider(
+                                        color = MaterialTheme.colorScheme.outlineVariant,
+                                        modifier = Modifier.padding(vertical = 6.dp),
+                                    )
+                                }
+                                if (sections.size > 1) {
+                                    Text(
+                                        text = section.query,
+                                        style = MaterialTheme.typography.labelMedium,
+                                        color = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.padding(top = 2.dp, bottom = 2.dp),
+                                    )
+                                }
+                                if (section.results.isEmpty()) {
+                                    Text(
+                                        text = section.raw.orEmpty(),
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                } else {
+                                    section.results.forEachIndexed { index, item ->
+                                        if (index > 0) {
+                                            HorizontalDivider(
+                                                color = MaterialTheme.colorScheme.outlineVariant,
+                                                modifier = Modifier.padding(vertical = 2.dp),
+                                            )
+                                        }
+                                        SearchResultRow(item)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SearchResultRow(result: SearchResult) {
+    val context = LocalContext.current
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { openUrl(context, result.url) }
+            .padding(vertical = 8.dp),
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Favicon(host = result.host, index = 0, size = 20.dp)
+        Column(Modifier.weight(1f)) {
+            Text(
+                text = result.title,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.primary,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+            if (result.host.isNotBlank()) {
+                Text(
+                    text = result.host,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            if (result.snippet.isNotBlank()) {
+                Text(
+                    text = result.snippet,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 3,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+    }
+}
+
+/** Favicons for the collapsed card; preloaded and staggered in. */
+@Composable
+private fun FaviconRow(hosts: List<String>) {
+    val context = LocalContext.current
+    LaunchedEffect(hosts) {
+        // Prefetch so the icons are ready before they are shown.
+        val loader = SingletonImageLoader.get(context)
+        hosts.take(6).forEach { host ->
+            runCatching {
+                loader.enqueue(
+                    ImageRequest.Builder(context).data(faviconUrl(host)).build(),
+                )
+            }
+        }
+    }
+    Row(
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        hosts.take(6).forEachIndexed { index, host ->
+            Favicon(host = host, index = index, size = 20.dp)
+        }
+    }
+}
+
+@Composable
+private fun Favicon(host: String, index: Int, size: androidx.compose.ui.unit.Dp) {
+    var visible by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) {
+        delay(index * 45L)
+        visible = true
+    }
+    val scale by animateFloatAsState(
+        targetValue = if (visible) 1f else 0.5f,
+        animationSpec = tween(durationMillis = 220),
+        label = "faviconScale",
+    )
+    val alpha by animateFloatAsState(
+        targetValue = if (visible) 1f else 0f,
+        animationSpec = tween(durationMillis = 220),
+        label = "faviconAlpha",
+    )
+    if (host.isBlank()) return
+    AsyncImage(
+        model = faviconUrl(host),
+        contentDescription = host,
+        modifier = Modifier
+            .size(size)
+            .graphicsLayer {
+                scaleX = scale
+                scaleY = scale
+                this.alpha = alpha
+            }
+            .clip(CircleShape)
+            .background(MaterialTheme.colorScheme.surfaceVariant),
+    )
+}
+
+private fun faviconUrl(host: String): String = "https://icons.duckduckgo.com/ip3/$host.ico"
+
+private fun openUrl(context: Context, url: String) {
+    runCatching {
+        context.startActivity(
+            Intent(Intent.ACTION_VIEW, Uri.parse(url)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+        )
+    }
+}
+
+/** Parses the "1. Title\n<url>\nsnippet" blocks returned by the search tool. */
+private fun parseSearchResults(text: String): List<SearchResult> {
+    val results = mutableListOf<SearchResult>()
+    var title: String? = null
+    var url: String? = null
+    val snippet = StringBuilder()
+
+    fun flush() {
+        if (title != null || url != null) {
+            results.add(
+                SearchResult(
+                    title = title.orEmpty().ifBlank { "Result ${results.size + 1}" },
+                    url = url.orEmpty(),
+                    snippet = snippet.toString().trim(),
+                ),
+            )
+        }
+        title = null
+        url = null
+        snippet.clear()
+    }
+
+    text.lineSequence().forEach { raw ->
+        val line = raw.trim()
+        when {
+            line.isEmpty() -> Unit
+            NUMERIC_ENTRY.matches(line) -> {
+                flush()
+                title = NUMERIC_ENTRY.find(line)?.groupValues?.get(1)?.trim().orEmpty()
+            }
+            line.startsWith("http://") || line.startsWith("https://") -> url = line
+            title != null -> {
+                if (snippet.isNotEmpty()) snippet.append(' ')
+                snippet.append(line)
+            }
+        }
+    }
+    flush()
+    return results
+}
+
+private val NUMERIC_ENTRY = Regex("^\\d+\\.\\s*(.*)$")
+
+/** Best-effort extraction of an argument from a JSON-ish tool-call arguments string. */
+private fun toolArgument(arguments: String, key: String): String {
+    val match = Regex("\"$key\"\\s*:\\s*\"((?:\\\\.|[^\"\\\\])*)\"").find(arguments)
+    return match?.groupValues?.get(1)
+        ?.replace("\\\"", "\"")
+        ?.replace("\\\\", "\\")
+        .orEmpty()
+        .ifBlank { arguments.trim().trim('{', '}', ' ') }
 }
 
 @Composable
