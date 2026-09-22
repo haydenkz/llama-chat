@@ -15,8 +15,8 @@ android {
         applicationId = "com.llamacpp.mobile"
         minSdk = 29
         targetSdk = 37
-        versionCode = 2
-        versionName = "0.1.1"
+        versionCode = 3
+        versionName = "0.1.2"
         vectorDrawables {
             useSupportLibrary = true
         }
@@ -89,6 +89,8 @@ dependencies {
 
     implementation(libs.coil.compose)
     implementation(libs.coil.network.okhttp)
+
+    implementation(libs.exp4j)
 
     testImplementation(libs.junit)
 }

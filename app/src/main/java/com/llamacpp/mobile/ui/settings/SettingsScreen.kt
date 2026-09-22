@@ -41,6 +41,7 @@ fun SettingsScreen(
     container: AppContainer,
     onBack: () -> Unit,
     onManageServers: () -> Unit,
+    onOpenTools: () -> Unit,
 ) {
     val vm: SettingsViewModel = viewModel(
         factory = appVmFactory(container) { SettingsViewModel(it.settingsRepository, it.serverRepository) },
@@ -91,6 +92,20 @@ fun SettingsScreen(
                     checked = hapticsEnabled,
                     onCheckedChange = vm::setHaptics,
                 )
+            }
+
+            Spacer(Modifier.height(12.dp))
+
+            SectionCard(title = "Tools") {
+                Text(
+                    text = "Choose which tools the model can call: web search, weather, Wikipedia, calculator and date & time.",
+                    style = androidx.compose.material3.MaterialTheme.typography.bodySmall,
+                    color = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(Modifier.height(8.dp))
+                OutlinedButton(onClick = onOpenTools, modifier = Modifier.fillMaxWidth()) {
+                    Text("Manage tools")
+                }
             }
 
             Spacer(Modifier.height(12.dp))

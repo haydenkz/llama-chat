@@ -28,9 +28,14 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Build
+import androidx.compose.material.icons.filled.Calculate
+import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.MenuBook
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.outlined.Psychology
 import androidx.compose.material3.CircularProgressIndicator
@@ -64,6 +69,7 @@ import androidx.compose.ui.unit.dp
 import coil3.SingletonImageLoader
 import coil3.compose.AsyncImage
 import coil3.request.ImageRequest
+import com.llamacpp.mobile.data.tools.WebSearchTool
 import com.llamacpp.mobile.domain.model.ChatMessage
 import com.llamacpp.mobile.domain.model.ChatRole
 import com.llamacpp.mobile.domain.model.ToolCall
@@ -140,9 +146,18 @@ fun AssistantTurnView(
             )
         }
 
-        if (toolCalls.isNotEmpty()) {
+        val webCalls = toolCalls.filter { it.name == WebSearchTool.NAME }
+        val otherCalls = toolCalls.filter { it.name != WebSearchTool.NAME }
+        if (webCalls.isNotEmpty()) {
             WebSearchCard(
-                calls = toolCalls.map { call -> call to toolResults[call.id] },
+                calls = webCalls.map { call -> call to toolResults[call.id] },
+                listState = listState,
+            )
+        }
+        otherCalls.forEach { call ->
+            GenericToolCard(
+                call = call,
+                result = toolResults[call.id],
                 listState = listState,
             )
         }
@@ -307,7 +322,7 @@ private data class SearchSection(
 private fun WebSearchCard(calls: List<Pair<ToolCall, ChatMessage?>>, listState: LazyListState?) {
     val sections = calls.map { (call, result) ->
         SearchSection(
-            query = toolArgument(call.arguments, "query").ifBlank { "search" },
+            query = jsonStringArg(call.arguments, "query") ?: "search",
             raw = result?.content,
             results = result?.content?.let(::parseSearchResults).orEmpty(),
         )
@@ -404,8 +419,8 @@ private fun WebSearchCard(calls: List<Pair<ToolCall, ChatMessage?>>, listState: 
                         Column(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(top = 6.dp)
-                                .onSizeChanged { contentHeightPx = it.height },
+                                .onSizeChanged { contentHeightPx = it.height }
+                                .padding(top = 6.dp),
                         ) {
                             sections.forEachIndexed { sectionIndex, section ->
                                 if (sections.size > 1 && sectionIndex > 0) {
@@ -440,6 +455,109 @@ private fun WebSearchCard(calls: List<Pair<ToolCall, ChatMessage?>>, listState: 
                                     }
                                 }
                             }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** A generic collapsible card for non-web-search tool calls. */
+@Composable
+private fun GenericToolCard(call: ToolCall, result: ChatMessage?, listState: LazyListState?) {
+    val label = toolLabel(call.name)
+    val summary = toolSummary(call.arguments)
+    val resultText = result?.content
+    var expanded by remember { mutableStateOf(false) }
+
+    val density = LocalDensity.current
+    val heightPx = remember { mutableFloatStateOf(0f) }
+    var contentHeightPx by remember { mutableStateOf(0) }
+    val maxHeightPx = with(density) { 360.dp.toPx() }
+
+    LaunchedEffect(expanded) {
+        val target = if (expanded) minOf(contentHeightPx.toFloat(), maxHeightPx) else 0f
+        animate(
+            initialValue = heightPx.floatValue,
+            targetValue = target,
+            animationSpec = tween(durationMillis = 260),
+        ) { value, _ ->
+            val delta = value - heightPx.floatValue
+            heightPx.floatValue = value
+            if (delta != 0f) listState?.dispatchRawDelta(delta)
+        }
+    }
+
+    Surface(
+        shape = RoundedCornerShape(12.dp),
+        color = MaterialTheme.colorScheme.surfaceContainer,
+        contentColor = MaterialTheme.colorScheme.onSurface,
+        modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
+    ) {
+        Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp)) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable(enabled = resultText != null) { expanded = !expanded },
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Icon(
+                    imageVector = toolIcon(call.name),
+                    contentDescription = null,
+                    modifier = Modifier.size(16.dp),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        text = label,
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    if (summary.isNotBlank()) {
+                        Text(
+                            text = summary,
+                            style = MaterialTheme.typography.bodyMedium,
+                            maxLines = if (expanded) 3 else 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                }
+                if (resultText == null) {
+                    CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
+                } else {
+                    Text(
+                        text = if (expanded) "Hide" else "Show",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+
+            if (resultText != null) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(with(density) { heightPx.floatValue.toDp() })
+                        .clipToBounds(),
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .verticalScroll(rememberScrollState()),
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .onSizeChanged { contentHeightPx = it.height }
+                                .padding(top = 6.dp),
+                        ) {
+                            Text(
+                                text = resultText,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
                         }
                     }
                 }
@@ -598,14 +716,39 @@ private fun parseSearchResults(text: String): List<SearchResult> {
 
 private val NUMERIC_ENTRY = Regex("^\\d+\\.\\s*(.*)$")
 
-/** Best-effort extraction of an argument from a JSON-ish tool-call arguments string. */
-private fun toolArgument(arguments: String, key: String): String {
-    val match = Regex("\"$key\"\\s*:\\s*\"((?:\\\\.|[^\"\\\\])*)\"").find(arguments)
-    return match?.groupValues?.get(1)
-        ?.replace("\\\"", "\"")
-        ?.replace("\\\\", "\\")
-        .orEmpty()
-        .ifBlank { arguments.trim().trim('{', '}', ' ') }
+/** Best-effort extraction of a string argument from a JSON-ish tool-call arguments string. */
+private fun jsonStringArg(arguments: String, key: String): String? {
+    val match = Regex("\"$key\"\\s*:\\s*\"((?:\\\\.|[^\"\\\\])*)\"").find(arguments) ?: return null
+    return match.groupValues[1]
+        .replace("\\\"", "\"")
+        .replace("\\\\", "\\")
+        .ifBlank { null }
+}
+
+/** A short human-readable summary of a tool call's arguments. */
+private fun toolSummary(arguments: String): String {
+    for (key in listOf("query", "location", "expression", "input", "text")) {
+        jsonStringArg(arguments, key)?.let { return it }
+    }
+    return arguments.trim().trim('{', '}', ' ')
+}
+
+private fun toolLabel(name: String): String = when (name) {
+    WebSearchTool.NAME -> "Web search"
+    "get_current_time" -> "Date & time"
+    "get_weather" -> "Weather"
+    "wikipedia_summary" -> "Wikipedia"
+    "calculate" -> "Calculator"
+    else -> name
+}
+
+private fun toolIcon(name: String) = when (name) {
+    WebSearchTool.NAME -> Icons.Default.Search
+    "get_current_time" -> Icons.Default.Schedule
+    "get_weather" -> Icons.Default.Cloud
+    "wikipedia_summary" -> Icons.Default.MenuBook
+    "calculate" -> Icons.Default.Calculate
+    else -> Icons.Default.Build
 }
 
 @Composable

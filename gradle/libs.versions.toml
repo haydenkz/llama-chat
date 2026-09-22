@@ -14,6 +14,7 @@ serialization = "1.11.0"
 coroutines = "1.11.0"
 markdown = "0.45.0"
 coil = "3.6.3"
+exp4j = "0.4.8"
 junit = "4.13.2"
 
 [libraries]
@@ -49,6 +50,8 @@ markdown-renderer-code = { group = "com.mikepenz", name = "multiplatform-markdow
 
 coil-compose = { group = "io.coil-kt.coil3", name = "coil-compose", version.ref = "coil" }
 coil-network-okhttp = { group = "io.coil-kt.coil3", name = "coil-network-okhttp", version.ref = "coil" }
+
+exp4j = { group = "net.objecthunter", name = "exp4j", version.ref = "exp4j" }
 
 junit = { group = "junit", name = "junit", version.ref = "junit" }
 

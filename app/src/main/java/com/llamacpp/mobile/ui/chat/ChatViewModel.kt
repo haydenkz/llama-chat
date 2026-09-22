@@ -10,6 +10,7 @@ import com.llamacpp.mobile.data.remote.dto.UsageDto
 import com.llamacpp.mobile.data.repo.ChatRepository
 import com.llamacpp.mobile.data.repo.ServerRepository
 import com.llamacpp.mobile.data.repo.SettingsRepository
+import com.llamacpp.mobile.data.tools.ToolRegistry
 import com.llamacpp.mobile.data.tools.WebSearchTool
 import com.llamacpp.mobile.domain.model.ChatMessage
 import com.llamacpp.mobile.domain.model.ChatRole
@@ -51,6 +52,8 @@ data class ChatUiState(
     val selectedModelId: String? = null,
     val messages: List<ChatMessage> = emptyList(),
     val settings: SamplerSettings = SamplerSettings(),
+    /** Tool names the user has switched off in Settings → Tools. */
+    val disabledTools: Set<String> = emptySet(),
     val isStreaming: Boolean = false,
     val streamContent: String = "",
     val streamReasoning: String = "",
@@ -76,7 +79,7 @@ class ChatViewModel(
     private val chatRepository: ChatRepository,
     private val serverRepository: ServerRepository,
     private val settingsRepository: SettingsRepository,
-    private val webSearchTool: WebSearchTool,
+    private val toolRegistry: ToolRegistry,
     private val json: Json,
 ) : ViewModel() {
 
@@ -110,6 +113,11 @@ class ChatViewModel(
             _state.map { it.activeModelId }.distinctUntilChanged()
                 .flatMapLatest { model -> settingsRepository.sampler(model) }
                 .collect { settings -> _state.update { it.copy(settings = settings) } }
+        }
+        viewModelScope.launch {
+            settingsRepository.disabledTools.collect { disabled ->
+                _state.update { it.copy(disabledTools = disabled) }
+            }
         }
     }
 
@@ -347,7 +355,11 @@ class ChatViewModel(
         // Use the live selection, not the conversation record, so switching models
         // takes effect immediately (the DB write may not have landed yet).
         val model = snapshot.activeModelId ?: conversation.model ?: return
-        val tools = if (snapshot.settings.webSearch) listOf(WebSearchTool.definition()) else null
+        val enabledTools = toolRegistry.all()
+            .map { it.name }
+            .filterNot { it in snapshot.disabledTools }
+            .toSet()
+        val tools = toolRegistry.definitions(enabledTools).takeIf { it.isNotEmpty() }
 
         _state.update {
             it.copy(
@@ -524,13 +536,10 @@ class ChatViewModel(
 
     private fun toolActivityLabel(call: ToolCall): String = when (call.name) {
         WebSearchTool.NAME -> "Searching the web for \"${queryOf(call).ifBlank { "…" }}\"…"
-        else -> "Running ${call.name}…"
+        else -> "Using ${toolRegistry.byName(call.name)?.displayName ?: call.name}…"
     }
 
-    private suspend fun executeTool(call: ToolCall): String = when (call.name) {
-        WebSearchTool.NAME -> webSearchTool.search(queryOf(call))
-        else -> "Unknown tool: ${call.name}"
-    }
+    private suspend fun executeTool(call: ToolCall): String = toolRegistry.execute(call)
 
     private fun queryOf(call: ToolCall): String =
         runCatching {

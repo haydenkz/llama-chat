@@ -78,7 +78,7 @@ fun ChatScreen(
                 it.chatRepository,
                 it.serverRepository,
                 it.settingsRepository,
-                it.webSearchTool,
+                it.toolRegistry,
                 it.json,
             )
         },

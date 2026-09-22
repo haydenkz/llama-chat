@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.2] - 2026-09-22
+
+### Added
+
+- New tools: **weather** (Open-Meteo), **Wikipedia**, **calculator** and
+  **date & time**.
+- **Settings → Tools** page to enable or disable each tool (all on by default).
+
+### Changed
+
+- Tool enable/disable moved out of the sampling sheet into the Tools page.
+- Release notes are now taken from this changelog.
+
 ## [0.1.1] - 2026-09-22
 
 ### Added
@@ -51,6 +64,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - ChatGPT-style haptics while generating (toggleable).
 - GitHub Actions CI and tag-based release workflow.
 
-[Unreleased]: https://github.com/haydenkz/llama-chat/compare/v0.1.1...HEAD
+[Unreleased]: https://github.com/haydenkz/llama-chat/compare/v0.1.2...HEAD
+[0.1.2]: https://github.com/haydenkz/llama-chat/releases/tag/v0.1.2
 [0.1.1]: https://github.com/haydenkz/llama-chat/releases/tag/v0.1.1
 [0.1.0]: https://github.com/haydenkz/llama-chat/releases/tag/v0.1.0

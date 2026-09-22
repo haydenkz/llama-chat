@@ -9,7 +9,12 @@ import com.llamacpp.mobile.data.remote.LlamaApi
 import com.llamacpp.mobile.data.repo.ChatRepository
 import com.llamacpp.mobile.data.repo.ServerRepository
 import com.llamacpp.mobile.data.repo.SettingsRepository
+import com.llamacpp.mobile.data.tools.CalculatorTool
+import com.llamacpp.mobile.data.tools.DateTimeTool
+import com.llamacpp.mobile.data.tools.ToolRegistry
 import com.llamacpp.mobile.data.tools.WebSearchTool
+import com.llamacpp.mobile.data.tools.WeatherTool
+import com.llamacpp.mobile.data.tools.WikipediaTool
 import kotlinx.serialization.json.Json
 import okhttp3.OkHttpClient
 import java.util.concurrent.TimeUnit
@@ -57,13 +62,22 @@ class AppContainer(context: Context) {
     val serverRepository = ServerRepository(serverDataStore, json)
     val settingsRepository = SettingsRepository(settingsDataStore, json)
 
-    /** Dedicated client for the web-search tool (browser UA, follows redirects). */
-    val webSearchTool = WebSearchTool(
-        OkHttpClient.Builder()
-            .connectTimeout(20, TimeUnit.SECONDS)
-            .readTimeout(30, TimeUnit.SECONDS)
-            .followRedirects(true)
-            .build(),
+    /** Dedicated client for network tools (browser UA, follows redirects). */
+    private val toolClient = OkHttpClient.Builder()
+        .connectTimeout(20, TimeUnit.SECONDS)
+        .readTimeout(30, TimeUnit.SECONDS)
+        .followRedirects(true)
+        .build()
+
+    /** Tools offered to the model (all enabled by default). */
+    val toolRegistry = ToolRegistry(
+        listOf(
+            WebSearchTool(toolClient),
+            WeatherTool(toolClient, json),
+            WikipediaTool(toolClient, json),
+            DateTimeTool(),
+            CalculatorTool(),
+        ),
     )
 
     private val database = Room.databaseBuilder(

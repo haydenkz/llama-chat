@@ -1,12 +1,8 @@
 package com.llamacpp.mobile.data.tools
 
+import com.llamacpp.mobile.data.remote.dto.ToolDto
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import kotlinx.serialization.json.JsonArray
-import kotlinx.serialization.json.JsonPrimitive
-import kotlinx.serialization.json.buildJsonObject
-import kotlinx.serialization.json.put
-import kotlinx.serialization.json.putJsonObject
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -16,16 +12,26 @@ import okhttp3.RequestBody.Companion.toRequestBody
  * Client-side `web_search` tool. Queries DuckDuckGo's HTML endpoint (no API key)
  * and returns a compact, model-readable list of results.
  */
-class WebSearchTool(
-    private val client: OkHttpClient,
-) {
+class WebSearchTool(private val client: OkHttpClient) : ChatTool {
+    override val name = NAME
+    override val displayName = "Web search"
+    override val description =
+        "Search the public web for up-to-date information. Use this whenever the answer depends on " +
+            "recent events, facts you are unsure about, or anything that happened after your training data."
+
+    override fun definition(): ToolDto =
+        functionTool(NAME, description, mapOf("query" to "The search query."))
+
+    override suspend fun execute(arguments: String): String =
+        search(toolStringArg(arguments, "query") ?: arguments.trim().trim('{', '}', ' '))
+
     suspend fun search(query: String, maxResults: Int = 6): String = withContext(Dispatchers.IO) {
         if (query.isBlank()) return@withContext "No query provided."
         try {
-            val form = "q=" + java.net.URLEncoder.encode(query, "UTF-8")
+            val form = "q=" + urlEncode(query)
             val request = Request.Builder()
                 .url("https://html.duckduckgo.com/html/")
-                .header("User-Agent", USER_AGENT)
+                .header("User-Agent", TOOL_USER_AGENT)
                 .header("Accept", "text/html")
                 .post(form.toRequestBody("application/x-www-form-urlencoded".toMediaType()))
                 .build()
@@ -39,10 +45,10 @@ class WebSearchTool(
             } else {
                 buildString {
                     append("Web results for \"").append(query).append("\":\n\n")
-                    results.forEachIndexed { i, r ->
-                        append(i + 1).append(". ").append(r.title).append('\n')
-                        append(r.url).append('\n')
-                        if (r.snippet.isNotBlank()) append(r.snippet).append('\n')
+                    results.forEachIndexed { index, result ->
+                        append(index + 1).append(". ").append(result.title).append('\n')
+                        append(result.url).append('\n')
+                        if (result.snippet.isNotBlank()) append(result.snippet).append('\n')
                         append('\n')
                     }
                 }.trim()
@@ -97,29 +103,5 @@ class WebSearchTool(
 
     companion object {
         const val NAME = "web_search"
-        private const val USER_AGENT =
-            "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Mobile Safari/537.36"
-
-        /** OpenAI-style tool definition advertised to the model. */
-        fun definition(): com.llamacpp.mobile.data.remote.dto.ToolDto =
-            com.llamacpp.mobile.data.remote.dto.ToolDto(
-                type = "function",
-                function = com.llamacpp.mobile.data.remote.dto.ToolDefinitionDto(
-                    name = NAME,
-                    description = "Search the public web for up-to-date information. " +
-                        "Use this whenever the answer depends on recent events, facts you are unsure about, " +
-                        "or anything that happened after your training data.",
-                    parameters = buildJsonObject {
-                        put("type", "object")
-                        putJsonObject("properties") {
-                            putJsonObject("query") {
-                                put("type", "string")
-                                put("description", "The search query.")
-                            }
-                        }
-                        put("required", JsonArray(listOf(JsonPrimitive("query"))))
-                    },
-                ),
-            )
     }
 }

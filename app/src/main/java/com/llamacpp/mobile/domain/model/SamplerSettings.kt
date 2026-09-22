@@ -36,8 +36,6 @@ data class SamplerSettings(
     val cachePrompt: Boolean = true,
     val stream: Boolean = true,
     val nKeep: Int = 0,
-    /** Offer the built-in web_search tool to the model. */
-    val webSearch: Boolean = true,
     /** Optional raw JSON string used as `response_format.schema`. */
     val jsonSchema: String = "",
 )

@@ -151,14 +151,6 @@ fun SamplerSettingsSheet(
                 )
             }
             item {
-                LabeledSwitch(
-                    title = "Web search",
-                    description = "Let the model call a built-in web_search tool for current information.",
-                    checked = settings.webSearch,
-                    onCheckedChange = { onChange(settings.copy(webSearch = it)) },
-                )
-            }
-            item {
                 OutlinedTextField(
                     value = settings.jsonSchema,
                     onValueChange = { onChange(settings.copy(jsonSchema = it)) },

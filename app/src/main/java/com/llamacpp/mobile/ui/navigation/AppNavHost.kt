@@ -16,6 +16,7 @@ import com.llamacpp.mobile.ui.serverinfo.ServerInfoScreen
 import com.llamacpp.mobile.ui.servers.ServerEditScreen
 import com.llamacpp.mobile.ui.servers.ServersScreen
 import com.llamacpp.mobile.ui.settings.SettingsScreen
+import com.llamacpp.mobile.ui.settings.ToolsScreen
 
 @Composable
 fun AppNavHost(container: AppContainer) {
@@ -43,7 +44,11 @@ fun AppNavHost(container: AppContainer) {
                 container = container,
                 onBack = { navController.popBackStack() },
                 onManageServers = { navController.navigate(Routes.SERVERS) },
+                onOpenTools = { navController.navigate(Routes.TOOLS) },
             )
+        }
+        composable(Routes.TOOLS) {
+            ToolsScreen(container = container, onBack = { navController.popBackStack() })
         }
         composable(Routes.SERVERS) {
             ServersScreen(
