@@ -218,6 +218,19 @@ class LlamaApi(
         awaitClose { source.cancel() }
     }
 
+    /** Non-streaming chat completion (used e.g. for generating conversation titles). */
+    suspend fun chatCompletion(
+        server: ServerConfig,
+        request: ChatCompletionRequestDto,
+    ): ChatCompletionChunkDto {
+        val httpRequest = Request.Builder()
+            .url(endpoint(server, "/v1/chat/completions"))
+            .post(bodyJson(request))
+            .auth(server.apiKey)
+            .build()
+        return executeJson(httpRequest)
+    }
+
     suspend fun abort(server: ServerConfig, model: String, completionId: String) {        val request = Request.Builder()
             .url(endpoint(server, "/v1/chat/completions/control"))
             .post(bodyJson(ControlRequestDto(model = model, id = completionId)))

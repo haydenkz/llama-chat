@@ -5,6 +5,7 @@ import androidx.lifecycle.viewModelScope
 import com.llamacpp.mobile.data.remote.ChatStreamEvent
 import com.llamacpp.mobile.data.remote.LlamaApi
 import com.llamacpp.mobile.data.remote.dto.ChatCompletionRequestDto
+import com.llamacpp.mobile.data.remote.dto.ChatMessageDto
 import com.llamacpp.mobile.data.remote.dto.TimingsDto
 import com.llamacpp.mobile.data.remote.dto.UsageDto
 import com.llamacpp.mobile.data.repo.ChatRepository
@@ -35,6 +36,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import java.util.UUID
@@ -421,7 +423,57 @@ class ChatViewModel(
                 completionId = null
             }
         }
+
+        // Name the conversation with the model after the first completed answer.
+        viewModelScope.launch { maybeGenerateTitle(conversationId, server, model) }
     }
+
+    /**
+     * Asks the model for a short, specific title for the conversation. Runs only
+     * once, after the first assistant answer, and replaces the provisional title.
+     */
+    private suspend fun maybeGenerateTitle(conversationId: String, server: ServerConfig, model: String) {
+        val messages = chatRepository.messages(conversationId).first()
+        val answered = messages.count { it.role == ChatRole.Assistant && it.content.isNotBlank() }
+        if (answered != 1) return
+
+        val user = messages.firstOrNull { it.role == ChatRole.User }?.content?.take(600) ?: return
+        val assistant = messages.firstOrNull { it.role == ChatRole.Assistant && it.content.isNotBlank() }
+            ?.content?.take(600).orEmpty()
+
+        val prompt = buildString {
+            append("Write a short, specific title (3 to 6 words) for the conversation below. ")
+            append("Reply with only the title — no quotes, no trailing punctuation.\n\n")
+            append("User: ").append(user).append('\n')
+            if (assistant.isNotBlank()) append("Assistant: ").append(assistant).append('\n')
+        }
+
+        val title = runCatching {
+            api.chatCompletion(
+                server,
+                ChatCompletionRequestDto(
+                    model = model,
+                    messages = listOf(ChatMessageDto(ChatRole.User.wire, JsonPrimitive(prompt))),
+                    stream = false,
+                    temperature = 0.3f,
+                    maxTokens = 32,
+                    cachePrompt = false,
+                    reasoning = false,
+                ),
+            )
+        }.getOrNull()
+            ?.choices?.firstOrNull()?.message?.content
+            ?.let(::sanitizeTitle)
+
+        if (!title.isNullOrBlank()) chatRepository.renameConversation(conversationId, title)
+    }
+
+    private fun sanitizeTitle(raw: String): String =
+        raw.lineSequence().firstOrNull().orEmpty()
+            .trim()
+            .trim('"', '\'', '“', '”', '`', '*', '#', '.', ':', ' ')
+            .take(60)
+            .trim()
 
     private class ToolCallAccumulator {
         var id: String = ""

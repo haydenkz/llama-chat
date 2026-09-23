@@ -60,6 +60,8 @@ class ChatRepository(
     suspend fun renameConversation(id: String, title: String) =
         dao.renameConversation(id, title, System.currentTimeMillis())
 
+    suspend fun conversation(id: String): Conversation? = dao.getConversation(id)?.toDomain()
+
     suspend fun deleteConversation(id: String) {
         dao.deleteMessages(id)
         dao.deleteConversation(id)
