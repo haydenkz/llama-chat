@@ -15,8 +15,8 @@ android {
         applicationId = "com.llamacpp.mobile"
         minSdk = 29
         targetSdk = 37
-        versionCode = 9
-        versionName = "0.2.0"
+        versionCode = 10
+        versionName = "0.2.1"
         vectorDrawables {
             useSupportLibrary = true
         }

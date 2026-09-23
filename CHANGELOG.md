@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-09-23
+
+### Fixed
+
+- Removed the hardcoded default server address (`192.168.2.3:8080`); the app no
+  longer ships a fixed IP, and the default server starts blank.
+- **Base URL** is now validated (http/https scheme and a port in 1–65535) with an
+  inline error, so a mistyped port like `500034` is rejected up front instead of
+  failing later as a raw connection error.
+
 ## [0.2.0] - 2026-09-22
 
 ### Added
@@ -138,7 +148,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Subtle haptics while generating (toggleable).
 - GitHub Actions CI and tag-based release workflow.
 
-[Unreleased]: https://github.com/haydenkz/llama-chat/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/haydenkz/llama-chat/compare/v0.2.1...HEAD
+[0.2.1]: https://github.com/haydenkz/llama-chat/releases/tag/v0.2.1
 [0.2.0]: https://github.com/haydenkz/llama-chat/releases/tag/v0.2.0
 [0.1.7]: https://github.com/haydenkz/llama-chat/releases/tag/v0.1.7
 [0.1.6]: https://github.com/haydenkz/llama-chat/releases/tag/v0.1.6
