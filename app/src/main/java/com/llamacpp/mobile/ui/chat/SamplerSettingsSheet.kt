@@ -1,6 +1,7 @@
 package com.llamacpp.mobile.ui.chat
 
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -11,7 +12,9 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.foundation.text.KeyboardOptions
@@ -24,13 +27,35 @@ import com.llamacpp.mobile.ui.components.SamplerSlider
 @Composable
 fun SamplerSettingsSheet(
     settings: SamplerSettings,
+    customized: Boolean,
     onChange: (SamplerSettings) -> Unit,
+    onReset: () -> Unit,
     onDismiss: () -> Unit,
 ) {
     ModalBottomSheet(onDismissRequest = onDismiss) {
         LazyColumn(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp),
         ) {
+            item {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Sampling", style = MaterialTheme.typography.titleMedium)
+                        Text(
+                            text = if (customized) {
+                                "Customized for this model"
+                            } else {
+                                "Defaults reported by the model"
+                            },
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    if (customized) {
+                        TextButton(onClick = onReset) { Text("Reset") }
+                    }
+                }
+                Spacer(Modifier.height(8.dp))
+            }
             item {
                 Text("System prompt", style = MaterialTheme.typography.titleSmall)
                 OutlinedTextField(

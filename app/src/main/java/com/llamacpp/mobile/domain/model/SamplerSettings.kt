@@ -39,3 +39,42 @@ data class SamplerSettings(
     /** Optional raw JSON string used as `response_format.schema`. */
     val jsonSchema: String = "",
 )
+
+/**
+ * Builds settings from the server's `default_generation_settings.params`
+ * (`GET /props?model=…`), falling back to the built-in defaults for any param
+ * the server doesn't report.
+ */
+fun samplerSettingsFromParams(params: Map<String, Double>): SamplerSettings {
+    fun f(key: String): Float? = params[key]?.toFloat()
+    fun i(key: String): Int? = params[key]
+        ?.takeIf { it >= Int.MIN_VALUE.toDouble() && it <= Int.MAX_VALUE.toDouble() }
+        ?.toInt()
+
+    return SamplerSettings(
+        temperature = f("temperature") ?: 1.0f,
+        dynatempRange = f("dynatemp_range") ?: 0.0f,
+        dynatempExponent = f("dynatemp_exponent") ?: 1.0f,
+        topK = i("top_k") ?: 40,
+        topP = f("top_p") ?: 0.95f,
+        minP = f("min_p") ?: 0.05f,
+        xtcProbability = f("xtc_probability") ?: 0.0f,
+        xtcThreshold = f("xtc_threshold") ?: 0.1f,
+        typicalP = f("typical_p") ?: 1.0f,
+        repeatLastN = i("repeat_last_n") ?: 64,
+        repeatPenalty = f("repeat_penalty") ?: 1.0f,
+        presencePenalty = f("presence_penalty") ?: 0.0f,
+        frequencyPenalty = f("frequency_penalty") ?: 0.0f,
+        dryMultiplier = f("dry_multiplier") ?: 0.0f,
+        dryBase = f("dry_base") ?: 1.75f,
+        dryAllowedLength = i("dry_allowed_length") ?: 2,
+        mirostat = i("mirostat") ?: 0,
+        mirostatTau = f("mirostat_tau") ?: 5.0f,
+        mirostatEta = f("mirostat_eta") ?: 0.1f,
+        seed = seedOrRandom(params["seed"]),
+    )
+}
+
+/** llama.cpp reports "random" as 4294967295 (= -1); normalize it. */
+private fun seedOrRandom(value: Double?): Int =
+    if (value == null || value >= 4_294_967_295.0 || value > Int.MAX_VALUE) -1 else value.toInt()

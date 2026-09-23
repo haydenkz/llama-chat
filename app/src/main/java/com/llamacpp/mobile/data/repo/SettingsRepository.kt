@@ -29,15 +29,23 @@ class SettingsRepository(
     /** Tools the user has switched off (all tools are on by default). */
     val disabledTools: Flow<Set<String>> = dataStore.data.map { it[disabledToolsKey] ?: emptySet() }
 
-    /** Per-model sampler settings; falls back to defaults when unset. */
-    fun sampler(model: String?): Flow<SamplerSettings> = dataStore.data.map { prefs ->
-        decodeSamplers(prefs[samplersKey])[model ?: GLOBAL_KEY] ?: SamplerSettings()
+    /** Per-model sampler settings, or null when the user hasn't customized them. */
+    fun savedSampler(model: String?): Flow<SamplerSettings?> = dataStore.data.map { prefs ->
+        decodeSamplers(prefs[samplersKey])[model ?: GLOBAL_KEY]
     }
 
     suspend fun saveSampler(model: String?, settings: SamplerSettings) {
         dataStore.edit { prefs ->
             val map = decodeSamplers(prefs[samplersKey]).toMutableMap()
             map[model ?: GLOBAL_KEY] = settings
+            prefs[samplersKey] = json.encodeToString(map)
+        }
+    }
+
+    suspend fun clearSampler(model: String?) {
+        dataStore.edit { prefs ->
+            val map = decodeSamplers(prefs[samplersKey]).toMutableMap()
+            map.remove(model ?: GLOBAL_KEY)
             prefs[samplersKey] = json.encodeToString(map)
         }
     }

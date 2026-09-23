@@ -20,6 +20,7 @@ import com.llamacpp.mobile.domain.model.LlamaModel
 import com.llamacpp.mobile.domain.model.SamplerSettings
 import com.llamacpp.mobile.domain.model.ServerConfig
 import com.llamacpp.mobile.domain.model.ToolCall
+import com.llamacpp.mobile.domain.model.samplerSettingsFromParams
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
@@ -27,6 +28,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
@@ -54,6 +56,8 @@ data class ChatUiState(
     val selectedModelId: String? = null,
     val messages: List<ChatMessage> = emptyList(),
     val settings: SamplerSettings = SamplerSettings(),
+    /** True when the user has tuned the sampler for this model. */
+    val settingsCustomized: Boolean = false,
     /** Tool names the user has switched off in Settings → Tools. */
     val disabledTools: Set<String> = emptySet(),
     val isStreaming: Boolean = false,
@@ -112,9 +116,29 @@ class ChatViewModel(
                 .collect { messages -> _state.update { it.copy(messages = messages) } }
         }
         viewModelScope.launch {
-            _state.map { it.activeModelId }.distinctUntilChanged()
-                .flatMapLatest { model -> settingsRepository.sampler(model) }
-                .collect { settings -> _state.update { it.copy(settings = settings) } }
+            combine(
+                _state.map { it.activeModelId }.distinctUntilChanged(),
+                serverRepository.activeServer.distinctUntilChanged(),
+            ) { modelId, server -> modelId to server }
+                .collect { (modelId, server) ->
+                    // Use the user's saved sampler if any; otherwise seed from the
+                    // model's own defaults reported by /props?model=…, so switching
+                    // models shows that model's real temperature/top-k/min-p/etc.
+                    val saved = modelId?.let { settingsRepository.savedSampler(it).first() }
+                    if (saved != null) {
+                        _state.update { it.copy(settings = saved, settingsCustomized = true) }
+                    } else {
+                        val defaults = modelId?.let { id ->
+                            runCatching { api.props(server, id) }.getOrNull()?.samplingDefaults
+                        }
+                        _state.update {
+                            it.copy(
+                                settings = defaults?.let(::samplerSettingsFromParams) ?: SamplerSettings(),
+                                settingsCustomized = false,
+                            )
+                        }
+                    }
+                }
         }
         viewModelScope.launch {
             settingsRepository.disabledTools.collect { disabled ->
@@ -261,9 +285,29 @@ class ChatViewModel(
     }
 
     fun updateSettings(settings: SamplerSettings) {
-        _state.update { it.copy(settings = settings) }
+        _state.update { it.copy(settings = settings, settingsCustomized = true) }
         viewModelScope.launch {
             settingsRepository.saveSampler(_state.value.activeModelId, settings)
+        }
+    }
+
+    /** Drops the saved sampler for the active model and returns to its defaults. */
+    fun resetSettings() {
+        viewModelScope.launch {
+            val modelId = _state.value.activeModelId
+            settingsRepository.clearSampler(modelId)
+            val server = _state.value.server
+            val defaults = if (modelId != null && server != null) {
+                runCatching { api.props(server, modelId) }.getOrNull()?.samplingDefaults
+            } else {
+                null
+            }
+            _state.update {
+                it.copy(
+                    settings = defaults?.let(::samplerSettingsFromParams) ?: SamplerSettings(),
+                    settingsCustomized = false,
+                )
+            }
         }
     }
 

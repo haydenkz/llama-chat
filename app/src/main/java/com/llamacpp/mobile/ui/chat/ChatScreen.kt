@@ -257,7 +257,9 @@ fun ChatScreen(
     if (showSamplerSettings) {
         SamplerSettingsSheet(
             settings = state.settings,
+            customized = state.settingsCustomized,
             onChange = vm::updateSettings,
+            onReset = vm::resetSettings,
             onDismiss = { showSamplerSettings = false },
         )
     }

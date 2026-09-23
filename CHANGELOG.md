@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.7] - 2026-09-22
+
+### Fixed
+
+- Sampler settings (temperature, top-k/p, min-p, penalties, seed, …) now default
+  to the **model's own values** reported by the server (`/props?model=…`), so
+  they change when you switch models. Previously they were hardcoded.
+
+### Added
+
+- The sampling sheet shows whether the values are the model's defaults or
+  customized, with a **Reset** action to return to the model defaults.
+
 ## [0.1.6] - 2026-09-22
 
 ### Added
@@ -98,7 +111,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - ChatGPT-style haptics while generating (toggleable).
 - GitHub Actions CI and tag-based release workflow.
 
-[Unreleased]: https://github.com/haydenkz/llama-chat/compare/v0.1.6...HEAD
+[Unreleased]: https://github.com/haydenkz/llama-chat/compare/v0.1.7...HEAD
+[0.1.7]: https://github.com/haydenkz/llama-chat/releases/tag/v0.1.7
 [0.1.6]: https://github.com/haydenkz/llama-chat/releases/tag/v0.1.6
 [0.1.5]: https://github.com/haydenkz/llama-chat/releases/tag/v0.1.5
 [0.1.4]: https://github.com/haydenkz/llama-chat/releases/tag/v0.1.4
