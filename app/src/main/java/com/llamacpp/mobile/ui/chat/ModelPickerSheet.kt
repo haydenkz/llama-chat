@@ -25,6 +25,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
@@ -50,7 +51,9 @@ fun ModelPickerList(
     onRefresh: () -> Unit,
     modifier: Modifier = Modifier,
     pendingIds: Set<String> = emptySet(),
+    hiddenIds: Set<String> = emptySet(),
 ) {
+    val visible = remember(models, hiddenIds) { models.filterNot { it.id in hiddenIds } }
     Column(modifier.fillMaxWidth()) {
         Row(
             modifier = Modifier.fillMaxWidth().padding(start = 20.dp, end = 12.dp, top = 8.dp, bottom = 4.dp),
@@ -71,7 +74,7 @@ fun ModelPickerList(
         }
 
         when {
-            loading && models.isEmpty() -> {
+            loading && visible.isEmpty() -> {
                 Row(
                     Modifier.fillMaxWidth().padding(24.dp),
                     horizontalArrangement = Arrangement.Center,
@@ -84,9 +87,13 @@ fun ModelPickerList(
                 }
             }
 
-            models.isEmpty() -> {
+            visible.isEmpty() -> {
                 Text(
-                    text = "No models available.",
+                    text = if (models.isEmpty()) {
+                        "No models available."
+                    } else {
+                        "All models are hidden. Manage them in Servers → edit this server."
+                    },
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(horizontal = 20.dp, vertical = 16.dp),
@@ -95,7 +102,7 @@ fun ModelPickerList(
 
             else -> {
                 LazyColumn(Modifier.heightIn(max = 460.dp)) {
-                    items(models, key = { it.id }) { model ->
+                    items(visible, key = { it.id }) { model ->
                         ModelRow(
                             model = model,
                             selected = model.id == selectedId,
@@ -105,6 +112,15 @@ fun ModelPickerList(
                     }
                 }
             }
+        }
+
+        if (hiddenIds.isNotEmpty() && visible.isNotEmpty()) {
+            Text(
+                text = "${hiddenIds.size} hidden · manage in Servers",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(horizontal = 20.dp, vertical = 10.dp),
+            )
         }
     }
 }

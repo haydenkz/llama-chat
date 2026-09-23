@@ -9,6 +9,8 @@ data class ServerConfig(
     val name: String,
     val baseUrl: String,
     val apiKey: String? = null,
+    /** Model ids hidden from the model picker. */
+    val hiddenModels: List<String> = emptyList(),
 ) {
     /** Base URL without a trailing slash. */
     val normalizedBaseUrl: String

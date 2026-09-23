@@ -474,6 +474,7 @@ private fun ModalModelPicker(
             onSelect = onSelect,
             onRefresh = onRefresh,
             pendingIds = state.pendingModelIds,
+            hiddenIds = state.server?.hiddenModels?.toSet().orEmpty(),
         )
     }
 }
