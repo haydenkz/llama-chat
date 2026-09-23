@@ -59,12 +59,11 @@ class ServerRepository(
 
     companion object {
         const val DEFAULT_SERVER_ID = "default-local"
-        const val DEFAULT_BASE_URL = "http://192.168.2.3:8080"
 
         fun defaultServer() = ServerConfig(
             id = DEFAULT_SERVER_ID,
-            name = "Local · 192.168.2.3",
-            baseUrl = DEFAULT_BASE_URL,
+            name = "My server",
+            baseUrl = "",
         )
     }
 }

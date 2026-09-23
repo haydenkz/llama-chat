@@ -42,6 +42,7 @@ import com.llamacpp.mobile.data.repo.ServerRepository
 import com.llamacpp.mobile.di.AppContainer
 import com.llamacpp.mobile.domain.model.LlamaModel
 import com.llamacpp.mobile.domain.model.ServerConfig
+import com.llamacpp.mobile.domain.model.baseUrlError
 import com.llamacpp.mobile.ui.appVmFactory
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
@@ -58,6 +59,8 @@ class ServerEditViewModel(
     var baseUrl by mutableStateOf("http://")
         private set
     var apiKey by mutableStateOf("")
+        private set
+    var urlError by mutableStateOf<String?>(null)
         private set
     var isNew by mutableStateOf(serverId == null)
         private set
@@ -86,7 +89,7 @@ class ServerEditViewModel(
     }
 
     fun onName(value: String) { name = value }
-    fun onBaseUrl(value: String) { baseUrl = value }
+    fun onBaseUrl(value: String) { baseUrl = value; urlError = null }
     fun onApiKey(value: String) { apiKey = value }
 
     val canSave: Boolean get() = name.isNotBlank() && baseUrl.isNotBlank()
@@ -97,6 +100,11 @@ class ServerEditViewModel(
 
     fun loadModels() {
         val target = currentFormAsServer()
+        val error = baseUrlError(target.baseUrl)
+        if (error != null) {
+            modelsError = error
+            return
+        }
         viewModelScope.launch {
             loadingModels = true
             modelsError = null
@@ -108,6 +116,8 @@ class ServerEditViewModel(
 
     fun save(onSaved: () -> Unit) {
         if (!canSave) return
+        urlError = baseUrlError(baseUrl)
+        if (urlError != null) return
         val server = currentFormAsServer().copy(
             id = serverId ?: UUID.randomUUID().toString(),
             hiddenModels = hiddenModels.toList(),
@@ -182,6 +192,14 @@ fun ServerEditScreen(
                 modifier = Modifier.fillMaxWidth(),
                 singleLine = true,
             )
+            vm.urlError?.let { error ->
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    text = error,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                )
+            }
             Spacer(Modifier.height(12.dp))
             OutlinedTextField(
                 value = vm.apiKey,

@@ -166,6 +166,14 @@ private fun ServerStep(vm: OnboardingViewModel) {
             singleLine = true,
             modifier = Modifier.fillMaxWidth(),
         )
+        vm.urlError?.let { error ->
+            Spacer(Modifier.height(4.dp))
+            Text(
+                text = error,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.error,
+            )
+        }
         Spacer(Modifier.height(12.dp))
         OutlinedTextField(
             value = vm.serverName,

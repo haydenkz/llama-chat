@@ -10,6 +10,7 @@ import com.llamacpp.mobile.data.repo.ServerRepository
 import com.llamacpp.mobile.data.repo.SettingsRepository
 import com.llamacpp.mobile.domain.model.LlamaModel
 import com.llamacpp.mobile.domain.model.ServerConfig
+import com.llamacpp.mobile.domain.model.baseUrlError
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
@@ -30,6 +31,8 @@ class OnboardingViewModel(
     var serverUrl by mutableStateOf("")
         private set
     var apiKey by mutableStateOf("")
+        private set
+    var urlError by mutableStateOf<String?>(null)
         private set
 
     var testing by mutableStateOf(false)
@@ -61,7 +64,7 @@ class OnboardingViewModel(
     }
 
     fun onName(value: String) { serverName = value }
-    fun onUrl(value: String) { serverUrl = value; testOk = null; testStatus = null }
+    fun onUrl(value: String) { serverUrl = value; testOk = null; testStatus = null; urlError = null }
     fun onApiKey(value: String) { apiKey = value; testOk = null; testStatus = null }
 
     private fun currentServer() = ServerConfig(
@@ -72,6 +75,12 @@ class OnboardingViewModel(
     )
 
     fun testConnection() {
+        val error = baseUrlError(serverUrl)
+        if (error != null) {
+            testOk = false
+            testStatus = error
+            return
+        }
         viewModelScope.launch {
             testing = true
             testOk = null
@@ -86,6 +95,11 @@ class OnboardingViewModel(
     fun goToServer() { step = OnboardingStep.Server }
 
     fun goToModels() {
+        val error = baseUrlError(serverUrl)
+        if (error != null) {
+            urlError = error
+            return
+        }
         viewModelScope.launch {
             val server = currentServer()
             serverRepository.upsert(server)

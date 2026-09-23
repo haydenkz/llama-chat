@@ -28,7 +28,6 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.llamacpp.mobile.BuildConfig
 import com.llamacpp.mobile.di.AppContainer
-import com.llamacpp.mobile.domain.model.ServerConfig
 import com.llamacpp.mobile.domain.model.ThemeMode
 import com.llamacpp.mobile.ui.appVmFactory
 import com.llamacpp.mobile.ui.components.LabeledSwitch
@@ -126,7 +125,6 @@ fun SettingsScreen(
                 LabeledValue("App", "LlamaChat")
                 LabeledValue("Version", BuildConfig.VERSION_NAME)
                 LabeledValue("API", "llama.cpp OpenAI-compatible")
-                LabeledValue("Server default", ServerConfig("", "", "http://192.168.2.3:8080").normalizedBaseUrl)
                 Spacer(Modifier.height(8.dp))
                 OutlinedButton(onClick = vm::rerunOnboarding, modifier = Modifier.fillMaxWidth()) {
                     Text("Run setup again")
