@@ -21,7 +21,14 @@ class ToolsViewModel(
     val disabled: StateFlow<Set<String>> = settingsRepository.disabledTools
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptySet())
 
+    val pistonUrl: StateFlow<String> = settingsRepository.pistonUrl
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), "")
+
     fun setEnabled(name: String, enabled: Boolean) {
         viewModelScope.launch { settingsRepository.setToolEnabled(name, enabled) }
+    }
+
+    fun setPistonUrl(url: String) {
+        viewModelScope.launch { settingsRepository.setPistonUrl(url) }
     }
 }

@@ -287,6 +287,14 @@ class LlamaApi(
         val request = Request.Builder().url(builder.build()).get().auth(server.apiKey).build()
         return json.parseToJsonElement(executeText(request))
     }
+
+    /** GET a path and return the body as-is (e.g. `/metrics` is Prometheus text). */
+    suspend fun rawText(server: ServerConfig, path: String, model: String? = null): String {
+        val builder = endpoint(server, path).newBuilder()
+        if (!model.isNullOrBlank()) builder.addQueryParameter("model", model)
+        val request = Request.Builder().url(builder.build()).get().auth(server.apiKey).build()
+        return executeText(request)
+    }
 }
 
 // ---- DTO -> domain mappers -------------------------------------------------

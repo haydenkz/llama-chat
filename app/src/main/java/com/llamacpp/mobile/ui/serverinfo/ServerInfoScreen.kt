@@ -145,7 +145,7 @@ fun ServerInfoScreen(
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 } else {
-                    JsonBlock(state.metricsJson ?: "—")
+                    JsonBlock(state.metricsText ?: "—")
                 }
             }
 

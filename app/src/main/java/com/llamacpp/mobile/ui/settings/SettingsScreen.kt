@@ -88,7 +88,7 @@ fun SettingsScreen(
             SectionCard(title = "Feedback") {
                 LabeledSwitch(
                     title = "Haptics while generating",
-                    description = "Subtle tick as tokens stream in, like the ChatGPT app.",
+                    description = "Subtle tick as tokens stream in.",
                     checked = hapticsEnabled,
                     onCheckedChange = vm::setHaptics,
                 )
@@ -127,6 +127,10 @@ fun SettingsScreen(
                 LabeledValue("Version", BuildConfig.VERSION_NAME)
                 LabeledValue("API", "llama.cpp OpenAI-compatible")
                 LabeledValue("Server default", ServerConfig("", "", "http://192.168.2.3:8080").normalizedBaseUrl)
+                Spacer(Modifier.height(8.dp))
+                OutlinedButton(onClick = vm::rerunOnboarding, modifier = Modifier.fillMaxWidth()) {
+                    Text("Run setup again")
+                }
             }
             Spacer(Modifier.height(24.dp))
         }

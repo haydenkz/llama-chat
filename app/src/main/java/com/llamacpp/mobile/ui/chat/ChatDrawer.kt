@@ -20,8 +20,8 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Memory
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material.icons.filled.Tag
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -53,6 +53,7 @@ fun ChatDrawer(
     serverOnline: Boolean?,
     conversations: List<Conversation>,
     selectedId: String?,
+    workingConversationId: String?,
     onNewChat: () -> Unit,
     onSelectConversation: (String) -> Unit,
     onDeleteConversation: (String) -> Unit,
@@ -150,6 +151,7 @@ fun ChatDrawer(
                 ConversationRow(
                     conversation = conversation,
                     selected = conversation.id == selectedId,
+                    working = conversation.id == workingConversationId,
                     onClick = { onSelectConversation(conversation.id) },
                     onLongClick = { pendingDelete = conversation },
                 )
@@ -157,13 +159,6 @@ fun ChatDrawer(
         }
 
         HorizontalDivider(Modifier.padding(vertical = 8.dp))
-        NavigationDrawerItem(
-            label = { Text("Completion") },
-            icon = { Icon(Icons.Default.Tag, null) },
-            selected = false,
-            onClick = { onNavigate(Routes.COMPLETION) },
-            modifier = Modifier.padding(horizontal = 12.dp),
-        )
         NavigationDrawerItem(
             label = { Text("Server info") },
             icon = { Icon(Icons.Default.Memory, null) },
@@ -208,6 +203,7 @@ fun ChatDrawer(
 private fun ConversationRow(
     conversation: Conversation,
     selected: Boolean,
+    working: Boolean,
     onClick: () -> Unit,
     onLongClick: () -> Unit,
 ) {
@@ -228,14 +224,27 @@ private fun ConversationRow(
             .padding(horizontal = 12.dp, vertical = 1.dp)
             .combinedClickable(onClick = onClick, onLongClick = onLongClick),
     ) {
-        Text(
-            text = conversation.title,
-            style = MaterialTheme.typography.bodyMedium,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
+        Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 12.dp),
-        )
+                .padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Text(
+                text = conversation.title,
+                style = MaterialTheme.typography.bodyMedium,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f),
+            )
+            if (working) {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(14.dp),
+                    strokeWidth = 2.dp,
+                    color = MaterialTheme.colorScheme.primary,
+                )
+            }
+        }
     }
 }

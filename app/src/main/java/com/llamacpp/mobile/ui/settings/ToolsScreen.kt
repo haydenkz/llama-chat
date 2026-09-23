@@ -14,11 +14,15 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -38,6 +42,8 @@ fun ToolsScreen(
         factory = appVmFactory(container) { ToolsViewModel(it.toolRegistry, it.settingsRepository) },
     )
     val disabled by vm.disabled.collectAsStateWithLifecycle()
+    val pistonUrl by vm.pistonUrl.collectAsStateWithLifecycle()
+    var pistonField by remember { mutableStateOf(pistonUrl) }
 
     Scaffold(
         topBar = {
@@ -64,6 +70,28 @@ fun ToolsScreen(
                         "Tool calling requires the model to be served with --jinja.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+
+            Spacer(Modifier.height(12.dp))
+
+            SectionCard(title = "Python code execution") {
+                Text(
+                    text = "Python runs in a self-hosted Piston sandbox on your server. " +
+                        "Leave the URL blank to use Piston on the llama-server host at port 2000.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                OutlinedTextField(
+                    value = pistonField,
+                    onValueChange = {
+                        pistonField = it
+                        vm.setPistonUrl(it)
+                    },
+                    label = { Text("Piston URL (optional)") },
+                    placeholder = { Text("http://<your-server>:2000") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
                 )
             }
 

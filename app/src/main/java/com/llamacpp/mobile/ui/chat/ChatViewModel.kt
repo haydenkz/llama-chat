@@ -6,6 +6,7 @@ import com.llamacpp.mobile.data.remote.ChatStreamEvent
 import com.llamacpp.mobile.data.remote.LlamaApi
 import com.llamacpp.mobile.data.remote.dto.ChatCompletionRequestDto
 import com.llamacpp.mobile.data.remote.dto.ChatMessageDto
+import com.llamacpp.mobile.data.remote.dto.MessageDto
 import com.llamacpp.mobile.data.remote.dto.TimingsDto
 import com.llamacpp.mobile.data.remote.dto.UsageDto
 import com.llamacpp.mobile.data.repo.ChatRepository
@@ -61,10 +62,10 @@ data class ChatUiState(
     /** Tool names the user has switched off in Settings → Tools. */
     val disabledTools: Set<String> = emptySet(),
     val isStreaming: Boolean = false,
+    /** The conversation currently being generated (may differ from the selected one). */
+    val streamingConversationId: String? = null,
     val streamContent: String = "",
     val streamReasoning: String = "",
-    /** Transient status shown while a tool call runs, e.g. "Searching the web…". */
-    val toolActivity: String? = null,
     val error: String? = null,
     val tokensPerSecond: Double? = null,
     val statusMessage: String? = null,
@@ -410,9 +411,9 @@ class ChatViewModel(
         _state.update {
             it.copy(
                 isStreaming = true,
+                streamingConversationId = conversationId,
                 streamContent = "",
                 streamReasoning = "",
-                toolActivity = null,
                 error = null,
                 tokensPerSecond = null,
             )
@@ -437,7 +438,6 @@ class ChatViewModel(
 
                 // Run each requested tool, feed the results back, and continue.
                 outcome.toolCalls.forEach { call ->
-                    _state.update { it.copy(toolActivity = toolActivityLabel(call)) }
                     val output = executeTool(call)
                     chatRepository.insertMessage(
                         ChatMessage(
@@ -449,7 +449,7 @@ class ChatViewModel(
                         ),
                     )
                 }
-                _state.update { it.copy(toolActivity = null, streamContent = "", streamReasoning = "") }
+                _state.update { it.copy(streamContent = "", streamReasoning = "") }
             }
         } catch (t: Throwable) {
             if (t is kotlinx.coroutines.CancellationException) throw t
@@ -459,9 +459,9 @@ class ChatViewModel(
                 _state.update {
                     it.copy(
                         isStreaming = false,
+                        streamingConversationId = null,
                         streamContent = "",
                         streamReasoning = "",
-                        toolActivity = null,
                     )
                 }
                 completionId = null
@@ -470,6 +470,8 @@ class ChatViewModel(
 
         // Name the conversation with the model after the first completed answer.
         viewModelScope.launch { maybeGenerateTitle(conversationId, server, model) }
+        // Summarize the turn's reasoning for the "Thought for Xs" line.
+        viewModelScope.launch { maybeSummarizeThinking(conversationId, server, model) }
     }
 
     /**
@@ -500,13 +502,14 @@ class ChatViewModel(
                     messages = listOf(ChatMessageDto(ChatRole.User.wire, JsonPrimitive(prompt))),
                     stream = false,
                     temperature = 0.3f,
-                    maxTokens = 32,
+                    maxTokens = 400,
                     cachePrompt = false,
                     reasoning = false,
                 ),
             )
         }.getOrNull()
-            ?.choices?.firstOrNull()?.message?.content
+            ?.choices?.firstOrNull()?.message
+            ?.let(::utilityText)
             ?.let(::sanitizeTitle)
 
         if (!title.isNullOrBlank()) chatRepository.renameConversation(conversationId, title)
@@ -518,6 +521,59 @@ class ChatViewModel(
             .trim('"', '\'', '“', '”', '`', '*', '#', '.', ':', ' ')
             .take(60)
             .trim()
+
+    /**
+     * Produces a one-line summary of the turn's reasoning and stores it on the
+     * message that carried it, for the "Thought for Xs" line.
+     */
+    private suspend fun maybeSummarizeThinking(conversationId: String, server: ServerConfig, model: String) {
+        val messages = chatRepository.messages(conversationId).first()
+        val target = messages.lastOrNull { it.reasoning.isNotBlank() && it.thinkingSummary == null }
+            ?: return
+        val reasoning = target.reasoning.take(2000)
+
+        val prompt = buildString {
+            append("Summarize what the assistant was figuring out, in ONE short sentence ")
+            append("(max 12 words). Reply with only the summary.\n\n")
+            append(reasoning)
+        }
+        val summary = runCatching {
+            api.chatCompletion(
+                server,
+                ChatCompletionRequestDto(
+                    model = model,
+                    messages = listOf(ChatMessageDto(ChatRole.User.wire, JsonPrimitive(prompt))),
+                    stream = false,
+                    temperature = 0.2f,
+                    maxTokens = 400,
+                    cachePrompt = false,
+                    reasoning = false,
+                ),
+            )
+        }.getOrNull()
+            ?.choices?.firstOrNull()?.message
+            ?.let(::utilityText)
+            ?.let(::sanitizeTitle)
+            ?.takeIf { it.isNotBlank() }
+            ?: reasoning.lineSequence().firstOrNull()?.trim()?.take(120)
+
+        if (!summary.isNullOrBlank()) {
+            chatRepository.updateMessage(target.copy(thinkingSummary = summary))
+        }
+    }
+
+    /**
+     * Text from a utility (title/summary) response. Reasoning models served with
+     * `--reasoning` may put everything in `reasoning_content`; take its last line
+     * as the answer in that case.
+     */
+    private fun utilityText(message: MessageDto): String? {
+        message.content?.takeIf { it.isNotBlank() }?.let { return it }
+        return message.reasoningContent
+            ?.lineSequence()
+            ?.map { it.trim() }
+            ?.lastOrNull { it.isNotBlank() }
+    }
 
     private class ToolCallAccumulator {
         var id: String = ""
@@ -628,11 +684,6 @@ class ChatViewModel(
             current.copy(messages = messages, error = failure, tokensPerSecond = speed)
         }
         return StreamOutcome(toolCalls, failure)
-    }
-
-    private fun toolActivityLabel(call: ToolCall): String = when (call.name) {
-        WebSearchTool.NAME -> "Searching the web for \"${queryOf(call).ifBlank { "…" }}\"…"
-        else -> "Using ${toolRegistry.byName(call.name)?.displayName ?: call.name}…"
     }
 
     private suspend fun executeTool(call: ToolCall): String = toolRegistry.execute(call)

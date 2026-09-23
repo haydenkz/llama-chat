@@ -34,4 +34,8 @@ class SettingsViewModel(
     fun setHaptics(enabled: Boolean) {
         viewModelScope.launch { settingsRepository.setHapticsWhileGenerating(enabled) }
     }
+
+    fun rerunOnboarding() {
+        viewModelScope.launch { settingsRepository.setOnboardingCompleted(false) }
+    }
 }

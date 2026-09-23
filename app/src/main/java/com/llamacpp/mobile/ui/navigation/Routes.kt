@@ -2,7 +2,6 @@ package com.llamacpp.mobile.ui.navigation
 
 object Routes {
     const val CHAT = "chat"
-    const val COMPLETION = "completion"
     const val SERVER_INFO = "server_info"
     const val SERVERS = "servers"
     const val SERVER_EDIT = "server_edit"

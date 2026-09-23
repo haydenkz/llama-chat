@@ -11,10 +11,13 @@ import com.llamacpp.mobile.data.repo.ServerRepository
 import com.llamacpp.mobile.data.repo.SettingsRepository
 import com.llamacpp.mobile.data.tools.CalculatorTool
 import com.llamacpp.mobile.data.tools.DateTimeTool
+import com.llamacpp.mobile.data.tools.FileTool
+import com.llamacpp.mobile.data.tools.PythonTool
 import com.llamacpp.mobile.data.tools.ToolRegistry
 import com.llamacpp.mobile.data.tools.WebSearchTool
 import com.llamacpp.mobile.data.tools.WeatherTool
 import com.llamacpp.mobile.data.tools.WikipediaTool
+import kotlinx.coroutines.flow.first
 import kotlinx.serialization.json.Json
 import okhttp3.OkHttpClient
 import java.util.concurrent.TimeUnit
@@ -77,6 +80,21 @@ class AppContainer(context: Context) {
             WikipediaTool(toolClient, json),
             DateTimeTool(),
             CalculatorTool(),
+            FileTool(appContext),
+            PythonTool(toolClient, json) {
+                // Prefer the configured Piston URL; otherwise assume Piston runs on
+                // the llama-server host at its default port.
+                val configured = settingsRepository.pistonUrl.first()
+                if (configured.isNotBlank()) {
+                    configured
+                } else {
+                    val server = serverRepository.activeServer.first()
+                    runCatching { java.net.URI(server.normalizedBaseUrl).host }
+                        .getOrNull()
+                        ?.let { "http://$it:2000" }
+                        .orEmpty()
+                }
+            },
         ),
     )
 

@@ -5,9 +5,21 @@ import android.content.Context
 import android.graphics.BitmapFactory
 import android.net.Uri
 import android.util.Base64
-import androidx.compose.animation.core.animate
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -22,7 +34,6 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
-import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -33,11 +44,12 @@ import androidx.compose.material.icons.filled.Calculate
 import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.InsertDriveFile
 import androidx.compose.material.icons.filled.MenuBook
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Search
-import androidx.compose.material.icons.outlined.Psychology
+import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -45,39 +57,45 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import coil3.SingletonImageLoader
 import coil3.compose.AsyncImage
 import coil3.request.ImageRequest
+import com.llamacpp.mobile.data.tools.FileTool
 import com.llamacpp.mobile.data.tools.WebSearchTool
 import com.llamacpp.mobile.domain.model.ChatMessage
 import com.llamacpp.mobile.domain.model.ChatRole
 import com.llamacpp.mobile.domain.model.ToolCall
-import com.llamacpp.mobile.ui.components.MarkdownText
 import com.llamacpp.mobile.ui.components.StreamingMarkdownText
+import com.llamacpp.mobile.ui.theme.CodeTextStyle
+import com.llamacpp.mobile.ui.util.formatBytes
 import com.llamacpp.mobile.ui.util.formatDuration
 import com.llamacpp.mobile.ui.util.formatSpeed
 import kotlinx.coroutines.delay
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 
 /** A run of assistant/tool messages between two user messages. */
 data class AssistantTurn(
@@ -108,11 +126,9 @@ fun UserBubble(message: ChatMessage, modifier: Modifier = Modifier) {
 }
 
 /**
- * Renders a whole assistant turn as three clearly separated zones:
- * a single merged **thinking** block, any **tool calls**, then the **answer**
- * (with the stats/actions row only once the answer is complete). This keeps
- * thinking from being split across tool iterations and keeps the generated
- * answer distinct from the tool plumbing.
+ * Renders an assistant turn in work-mode style: a **thinking** status line
+ * (shimmer while working → "Thought for Xs" with a short summary), compact **tool
+ * chips**, the **answer** (streams live), then a **Files** section.
  */
 @Composable
 fun AssistantTurnView(
@@ -121,73 +137,87 @@ fun AssistantTurnView(
     isStreaming: Boolean,
     streamingContent: String,
     streamingReasoning: String,
-    listState: LazyListState?,
     canRegenerate: Boolean,
     onCopy: (ChatMessage) -> Unit,
     onRegenerate: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val thinking = remember(turn.messages, streamingReasoning) {
+    val finalAnswer = remember(turn.messages) {
+        turn.messages.lastOrNull { it.content.isNotBlank() && it.toolCalls.isEmpty() }
+    }
+    val allToolCalls = remember(turn.messages) { turn.messages.flatMap { it.toolCalls } }
+    val fileCalls = remember(allToolCalls) { allToolCalls.filter { it.name == FileTool.NAME } }
+    val error = remember(turn.messages) { turn.messages.firstNotNullOfOrNull { it.error } }
+
+    // Everything the model "worked through": reasoning + text it wrote between tools.
+    val detail = remember(turn.messages, streamingReasoning) {
         buildList {
-            turn.messages.forEach { if (it.reasoning.isNotBlank()) add(it.reasoning) }
+            turn.messages.forEach { message ->
+                if (message.reasoning.isNotBlank()) add(message.reasoning)
+                if (message.content.isNotBlank() && message !== finalAnswer) add(message.content)
+            }
             if (streamingReasoning.isNotBlank()) add(streamingReasoning)
         }.joinToString("\n\n")
     }
-    val toolCalls = remember(turn.messages) { turn.messages.flatMap { it.toolCalls } }
-    val answer = remember(turn.messages) { turn.messages.lastOrNull { it.content.isNotBlank() } }
-    val error = remember(turn.messages) { turn.messages.firstNotNullOfOrNull { it.error } }
-    val answerText = if (isStreaming) streamingContent else answer?.content.orEmpty()
+    val summary = remember(turn.messages) {
+        turn.messages.firstNotNullOfOrNull { it.thinkingSummary }
+    }
+    val thoughtSeconds = remember(turn.messages) {
+        val first = turn.messages.firstOrNull()?.createdAt ?: return@remember 0L
+        val last = turn.messages.lastOrNull()?.createdAt ?: first
+        ((last - first) / 1000L).coerceAtLeast(0L)
+    }
+    // "Working" = the model is still going and hasn't produced answer text yet.
+    val working = isStreaming && streamingContent.isBlank() && finalAnswer == null
+
+    // Live timer that keeps counting while the model works — including while it
+    // runs tools — instead of only updating when a message is persisted.
+    var elapsedSeconds by remember { mutableStateOf(0L) }
+    val turnStart = remember(turn.id) { System.currentTimeMillis() }
+    LaunchedEffect(isStreaming) {
+        while (isStreaming) {
+            elapsedSeconds = ((System.currentTimeMillis() - turnStart) / 1000L).coerceAtLeast(0L)
+            delay(1000L)
+        }
+    }
 
     Column(modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp)) {
-        if (thinking.isNotBlank()) {
-            ThinkingBlock(
-                reasoning = thinking,
-                streaming = isStreaming && answerText.isBlank(),
+        if (working) {
+            ThinkingStatus(working = true, durationSeconds = elapsedSeconds, summary = null, detail = null)
+        } else if (detail.isNotBlank()) {
+            ThinkingStatus(
+                working = false,
+                durationSeconds = thoughtSeconds,
+                summary = summary,
+                detail = detail,
             )
         }
 
-        val webCalls = toolCalls.filter { it.name == WebSearchTool.NAME }
-        val otherCalls = toolCalls.filter { it.name != WebSearchTool.NAME }
-        if (webCalls.isNotEmpty()) {
-            WebSearchCard(
-                calls = webCalls.map { call -> call to toolResults[call.id] },
-                listState = listState,
-            )
-        }
-        otherCalls.forEach { call ->
-            GenericToolCard(
-                call = call,
-                result = toolResults[call.id],
-                listState = listState,
-            )
+        allToolCalls.filter { it.name != FileTool.NAME }.forEach { call ->
+            ToolChip(call = call, result = toolResults[call.id])
         }
 
-        if (isStreaming && answerText.isEmpty() && thinking.isBlank() && toolCalls.isEmpty()) {
-            Row(
-                modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
-            ) {
-                CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
-                Text(
-                    text = "Thinking…",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
+        if (isStreaming && streamingContent.isNotEmpty()) {
+            StreamingMarkdownText(content = streamingContent, modifier = Modifier.fillMaxWidth())
+        } else if (!isStreaming && finalAnswer != null) {
+            StreamingMarkdownText(content = finalAnswer.content, modifier = Modifier.fillMaxWidth())
         }
 
-        when {
-            isStreaming && answerText.isNotEmpty() -> {
-                StreamingMarkdownText(content = answerText, modifier = Modifier.fillMaxWidth())
-            }
-            answerText.isNotEmpty() -> {
-                MarkdownText(content = answerText, modifier = Modifier.fillMaxWidth())
+        // Files only appear once the model has finished responding.
+        if (!isStreaming && fileCalls.isNotEmpty()) {
+            Spacer(Modifier.height(4.dp))
+            Text(
+                text = "Files",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Spacer(Modifier.height(6.dp))
+            fileCalls.forEach { call ->
+                FileRow(call = call, result = toolResults[call.id])
             }
         }
 
         if (error != null) {
-            if (answerText.isNotEmpty()) Spacer(Modifier.height(4.dp))
             Text(
                 text = error,
                 style = MaterialTheme.typography.bodySmall,
@@ -195,14 +225,19 @@ fun AssistantTurnView(
             )
         }
 
-        // Stats + actions only once the answer is finished.
-        if (!isStreaming && answer != null) {
-            AnswerActions(
-                message = answer,
-                canRegenerate = canRegenerate,
-                onCopy = { onCopy(answer) },
-                onRegenerate = onRegenerate,
-            )
+        AnimatedVisibility(
+            visible = !isStreaming && finalAnswer != null,
+            enter = expandVertically() + fadeIn(),
+            exit = shrinkVertically() + fadeOut(),
+        ) {
+            if (finalAnswer != null) {
+                AnswerActions(
+                    message = finalAnswer,
+                    canRegenerate = canRegenerate,
+                    onCopy = { onCopy(finalAnswer) },
+                    onRegenerate = onRegenerate,
+                )
+            }
         }
     }
 }
@@ -248,315 +283,204 @@ private fun AnswerActions(
     }
 }
 
+/** Thinking status line: shimmer while working, then "Thought for Xs" + summary. */
 @Composable
-private fun ThinkingBlock(reasoning: String, streaming: Boolean) {
-    var expanded by remember { mutableStateOf(streaming) }
-    var userToggled by remember { mutableStateOf(false) }
-    LaunchedEffect(streaming) {
-        if (!userToggled) expanded = streaming
+private fun ThinkingStatus(
+    working: Boolean,
+    durationSeconds: Long,
+    summary: String?,
+    detail: String?,
+) {
+    var expanded by remember { mutableStateOf(false) }
+    val expandedText = summary?.takeIf { it.isNotBlank() } ?: detail
+    val canExpand = !working && !expandedText.isNullOrBlank()
+
+    Column(Modifier.fillMaxWidth().padding(vertical = 2.dp)) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable(enabled = canExpand) { expanded = !expanded }
+                .padding(vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            if (working) {
+                ShimmerText(text = "Thinking", modifier = Modifier.weight(1f))
+                Text(
+                    text = "${durationSeconds}s",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            } else {
+                Text(
+                    text = formatThought(durationSeconds),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.weight(1f),
+                )
+                if (canExpand) {
+                    Text(
+                        text = if (expanded) "⌄" else "›",
+                        style = MaterialTheme.typography.titleMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+        }
+        if (canExpand) {
+            AnimatedVisibility(visible = expanded) {
+                Text(
+                    text = expandedText.orEmpty(),
+                    style = MaterialTheme.typography.bodySmall,
+                    fontStyle = FontStyle.Italic,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = 320.dp)
+                        .verticalScroll(rememberScrollState())
+                        .padding(bottom = 6.dp),
+                )
+            }
+        }
     }
+}
+
+/** "Thinking" with a sweeping highlight while the model works. */
+@Composable
+private fun ShimmerText(text: String, modifier: Modifier = Modifier) {
+    val transition = rememberInfiniteTransition(label = "shimmer")
+    val progress by transition.animateFloat(
+        initialValue = 0f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 1500, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart,
+        ),
+        label = "shimmerProgress",
+    )
+    val base = MaterialTheme.colorScheme.onSurfaceVariant
+    val highlight = MaterialTheme.colorScheme.onSurface
+    val sweep = 600f
+    val start = progress * (sweep * 2f) - sweep
+    val brush = Brush.linearGradient(
+        colors = listOf(base, highlight, base),
+        start = Offset(start, 0f),
+        end = Offset(start + sweep, 0f),
+    )
+    Text(
+        text = text,
+        style = MaterialTheme.typography.labelMedium.copy(brush = brush),
+        modifier = modifier,
+    )
+}
+
+private fun formatThought(seconds: Long): String = when {
+    seconds < 1L -> "Thought briefly"
+    seconds < 60L -> "Thought for ${seconds}s"
+    else -> "Thought for ${seconds / 60}m ${seconds % 60}s"
+}
+
+/**
+ * A compact, collapsible tool chip. Web search keeps its favicons; other tools show
+ * a one-line input and the output.
+ */
+@Composable
+private fun ToolChip(call: ToolCall, result: ChatMessage?) {
+    val label = toolLabel(call.name)
+    val summary = toolSummary(call.arguments)
+    val resultText = result?.content
+    val running = result == null
+    var expanded by remember { mutableStateOf(false) }
+
+    val isWeb = call.name == WebSearchTool.NAME
+    val results = remember(resultText, isWeb) {
+        if (isWeb) resultText?.let(::parseSearchResults).orEmpty() else emptyList()
+    }
+    val hosts = remember(results) { results.map { it.host }.filter { it.isNotBlank() }.distinct() }
 
     Surface(
         shape = RoundedCornerShape(10.dp),
         color = MaterialTheme.colorScheme.surfaceContainer,
-        contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
-        modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
+        contentColor = MaterialTheme.colorScheme.onSurface,
+        modifier = Modifier.fillMaxWidth().padding(bottom = 6.dp),
     ) {
-        Column {
+        Column(Modifier.fillMaxWidth()) {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clickable {
-                        userToggled = true
-                        expanded = !expanded
-                    }
+                    .clickable(enabled = resultText != null) { expanded = !expanded }
                     .padding(horizontal = 10.dp, vertical = 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-            ) {
-                Icon(Icons.Outlined.Psychology, contentDescription = null, modifier = Modifier.size(16.dp))
-                Text(
-                    text = when {
-                        expanded -> "Hide thinking"
-                        streaming -> "Thinking…"
-                        else -> "Show thinking"
-                    },
-                    style = MaterialTheme.typography.labelMedium,
-                    modifier = Modifier.weight(1f),
-                )
-                Text(
-                    text = if (expanded) "▾" else "▸",
-                    style = MaterialTheme.typography.labelMedium,
-                )
-            }
-            if (expanded) {
-                Text(
-                    text = reasoning,
-                    style = MaterialTheme.typography.bodySmall,
-                    fontStyle = FontStyle.Italic,
-                    modifier = Modifier
-                        .heightIn(max = 320.dp)
-                        .padding(start = 10.dp, end = 10.dp, bottom = 10.dp),
-                )
-            }
-        }
-    }
-}
-
-private data class SearchResult(val title: String, val url: String, val snippet: String) {
-    val host: String get() = runCatching { java.net.URI(url).host?.removePrefix("www.") }.getOrNull().orEmpty()
-}
-
-private data class SearchSection(
-    val query: String,
-    val raw: String?,
-    val results: List<SearchResult>,
-)
-
-/**
- * One card for a whole turn's web searches (a model may issue several calls in a
- * single response). Collapsed: the queries + result favicons. Expanded: the
- * results, grouped per query, grown downward.
- */
-@Composable
-private fun WebSearchCard(calls: List<Pair<ToolCall, ChatMessage?>>, listState: LazyListState?) {
-    val sections = calls.map { (call, result) ->
-        SearchSection(
-            query = jsonStringArg(call.arguments, "query") ?: "search",
-            raw = result?.content,
-            results = result?.content?.let(::parseSearchResults).orEmpty(),
-        )
-    }
-    val ready = sections.all { it.raw != null }
-    val hosts = sections.flatMap { it.results }.map { it.host }.filter { it.isNotBlank() }.distinct()
-    val queryLine = sections.joinToString("   ·   ") { it.query }
-    var expanded by remember { mutableStateOf(false) }
-
-    val density = LocalDensity.current
-    val heightPx = remember { mutableFloatStateOf(0f) }
-    var contentHeightPx by remember { mutableStateOf(0) }
-    val maxHeightPx = with(density) { 360.dp.toPx() }
-
-    LaunchedEffect(expanded) {
-        val target = if (expanded) minOf(contentHeightPx.toFloat(), maxHeightPx) else 0f
-        animate(
-            initialValue = heightPx.floatValue,
-            targetValue = target,
-            animationSpec = tween(durationMillis = 260),
-        ) { value, _ ->
-            val delta = value - heightPx.floatValue
-            heightPx.floatValue = value
-            // The list is reverse-laid-out, so a taller item would push everything
-            // above it up. Nudge the scroll by the same delta each frame to keep
-            // the header pinned and let the results grow downward.
-            if (delta != 0f) listState?.dispatchRawDelta(delta)
-        }
-    }
-
-    Surface(
-        shape = RoundedCornerShape(12.dp),
-        color = MaterialTheme.colorScheme.surfaceContainer,
-        contentColor = MaterialTheme.colorScheme.onSurface,
-        modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
-    ) {
-        Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp)) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clickable(enabled = ready) { expanded = !expanded },
-                verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                Icon(
-                    Icons.Default.Search,
-                    contentDescription = null,
-                    modifier = Modifier.size(16.dp),
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                Column(Modifier.weight(1f)) {
-                    Text(
-                        text = if (calls.size > 1) "Web search · ${calls.size}" else "Web search",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    if (queryLine.isNotBlank()) {
-                        Text(
-                            text = queryLine,
-                            style = MaterialTheme.typography.bodyMedium,
-                            maxLines = if (expanded) 3 else 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                    }
-                }
-                if (!ready) {
+                if (running) {
                     CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
                 } else {
-                    Text(
-                        text = if (expanded) "Hide" else "Show",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    Icon(
+                        imageVector = toolIcon(call.name),
+                        contentDescription = null,
+                        modifier = Modifier.size(16.dp),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
-            }
-
-            if (ready && !expanded && hosts.isNotEmpty()) {
-                Spacer(Modifier.height(10.dp))
-                FaviconRow(hosts)
-            }
-
-            if (ready) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(with(density) { heightPx.floatValue.toDp() })
-                        .clipToBounds(),
-                ) {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .verticalScroll(rememberScrollState()),
-                    ) {
-                        Column(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .onSizeChanged { contentHeightPx = it.height }
-                                .padding(top = 6.dp),
-                        ) {
-                            sections.forEachIndexed { sectionIndex, section ->
-                                if (sections.size > 1 && sectionIndex > 0) {
-                                    HorizontalDivider(
-                                        color = MaterialTheme.colorScheme.outlineVariant,
-                                        modifier = Modifier.padding(vertical = 6.dp),
-                                    )
-                                }
-                                if (sections.size > 1) {
-                                    Text(
-                                        text = section.query,
-                                        style = MaterialTheme.typography.labelMedium,
-                                        color = MaterialTheme.colorScheme.primary,
-                                        modifier = Modifier.padding(top = 2.dp, bottom = 2.dp),
-                                    )
-                                }
-                                if (section.results.isEmpty()) {
-                                    Text(
-                                        text = section.raw.orEmpty(),
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    )
-                                } else {
-                                    section.results.forEachIndexed { index, item ->
-                                        if (index > 0) {
-                                            HorizontalDivider(
-                                                color = MaterialTheme.colorScheme.outlineVariant,
-                                                modifier = Modifier.padding(vertical = 2.dp),
-                                            )
-                                        }
-                                        SearchResultRow(item)
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-/** A generic collapsible card for non-web-search tool calls. */
-@Composable
-private fun GenericToolCard(call: ToolCall, result: ChatMessage?, listState: LazyListState?) {
-    val label = toolLabel(call.name)
-    val summary = toolSummary(call.arguments)
-    val resultText = result?.content
-    var expanded by remember { mutableStateOf(false) }
-
-    val density = LocalDensity.current
-    val heightPx = remember { mutableFloatStateOf(0f) }
-    var contentHeightPx by remember { mutableStateOf(0) }
-    val maxHeightPx = with(density) { 360.dp.toPx() }
-
-    LaunchedEffect(expanded) {
-        val target = if (expanded) minOf(contentHeightPx.toFloat(), maxHeightPx) else 0f
-        animate(
-            initialValue = heightPx.floatValue,
-            targetValue = target,
-            animationSpec = tween(durationMillis = 260),
-        ) { value, _ ->
-            val delta = value - heightPx.floatValue
-            heightPx.floatValue = value
-            if (delta != 0f) listState?.dispatchRawDelta(delta)
-        }
-    }
-
-    Surface(
-        shape = RoundedCornerShape(12.dp),
-        color = MaterialTheme.colorScheme.surfaceContainer,
-        contentColor = MaterialTheme.colorScheme.onSurface,
-        modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
-    ) {
-        Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp)) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clickable(enabled = resultText != null) { expanded = !expanded },
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                Icon(
-                    imageVector = toolIcon(call.name),
-                    contentDescription = null,
-                    modifier = Modifier.size(16.dp),
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
                 Column(Modifier.weight(1f)) {
-                    Text(
-                        text = label,
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
+                    Text(text = label, style = MaterialTheme.typography.bodyMedium)
                     if (summary.isNotBlank()) {
                         Text(
                             text = summary,
-                            style = MaterialTheme.typography.bodyMedium,
-                            maxLines = if (expanded) 3 else 1,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                         )
                     }
                 }
-                if (resultText == null) {
-                    CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
-                } else {
+                if (resultText != null) {
                     Text(
-                        text = if (expanded) "Hide" else "Show",
-                        style = MaterialTheme.typography.labelSmall,
+                        text = if (expanded) "▾" else "▸",
+                        style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
             }
 
-            if (resultText != null) {
-                Box(
-                    modifier = Modifier
+            if (isWeb && resultText != null && !expanded && hosts.isNotEmpty()) {
+                FaviconRow(
+                    hosts = hosts,
+                    modifier = Modifier.padding(start = 10.dp, end = 10.dp, bottom = 8.dp),
+                )
+            }
+
+            AnimatedVisibility(visible = expanded) {
+                Column(
+                    Modifier
                         .fillMaxWidth()
-                        .height(with(density) { heightPx.floatValue.toDp() })
-                        .clipToBounds(),
+                        .padding(start = 10.dp, end = 10.dp, bottom = 10.dp),
                 ) {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .verticalScroll(rememberScrollState()),
-                    ) {
-                        Column(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .onSizeChanged { contentHeightPx = it.height }
-                                .padding(top = 6.dp),
+                    if (isWeb && results.isNotEmpty()) {
+                        results.forEachIndexed { index, item ->
+                            if (index > 0) {
+                                HorizontalDivider(
+                                    color = MaterialTheme.colorScheme.outlineVariant,
+                                    modifier = Modifier.padding(vertical = 2.dp),
+                                )
+                            }
+                            SearchResultRow(item)
+                        }
+                    } else {
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = MaterialTheme.colorScheme.surfaceContainerLowest,
+                            contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.fillMaxWidth().heightIn(max = 240.dp),
                         ) {
                             Text(
-                                text = resultText,
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                text = resultText.orEmpty().ifBlank { "(no output)" },
+                                style = CodeTextStyle,
+                                fontFamily = FontFamily.Monospace,
+                                modifier = Modifier
+                                    .verticalScroll(rememberScrollState())
+                                    .padding(10.dp),
                             )
                         }
                     }
@@ -564,6 +488,79 @@ private fun GenericToolCard(call: ToolCall, result: ChatMessage?, listState: Laz
             }
         }
     }
+}
+
+/** A downloadable file produced by the model. */
+@Composable
+private fun FileRow(call: ToolCall, result: ChatMessage?) {
+    val context = LocalContext.current
+    val filename = remember(call.arguments) {
+        jsonArg(call.arguments, "filename").orEmpty().ifBlank { "file.txt" }
+    }
+    val content = remember(call.arguments) { jsonArg(call.arguments, "content").orEmpty() }
+    val sizeBytes = remember(content) { content.toByteArray(Charsets.UTF_8).size.toLong() }
+    val mime = remember(filename) { mimeFor(filename) }
+    val created = result?.content?.startsWith("Created") == true
+    val working = result == null
+
+    val saveLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument(mime),
+    ) { uri ->
+        if (uri != null) {
+            runCatching {
+                context.contentResolver.openOutputStream(uri)?.use { it.write(content.toByteArray()) }
+            }
+        }
+    }
+
+    Surface(
+        shape = RoundedCornerShape(12.dp),
+        color = MaterialTheme.colorScheme.surfaceContainer,
+        contentColor = MaterialTheme.colorScheme.onSurface,
+        modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            if (working) {
+                CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+            } else {
+                Icon(
+                    Icons.Default.InsertDriveFile,
+                    contentDescription = null,
+                    modifier = Modifier.size(20.dp),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Column(Modifier.weight(1f)) {
+                Text(
+                    text = filename,
+                    style = MaterialTheme.typography.bodyMedium,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    text = when {
+                        working -> "Working on file…"
+                        !created -> result.content.lineSequence().firstOrNull().orEmpty().take(80)
+                        else -> formatBytes(sizeBytes)
+                    },
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            TextButton(
+                onClick = { saveLauncher.launch(filename) },
+                enabled = content.isNotBlank() && !working,
+            ) { Text("Save") }
+        }
+    }
+}
+
+private data class SearchResult(val title: String, val url: String, val snippet: String) {
+    val host: String get() = runCatching { java.net.URI(url).host?.removePrefix("www.") }.getOrNull().orEmpty()
 }
 
 @Composable
@@ -605,22 +602,19 @@ private fun SearchResultRow(result: SearchResult) {
     }
 }
 
-/** Favicons for the collapsed card; preloaded and staggered in. */
 @Composable
-private fun FaviconRow(hosts: List<String>) {
+private fun FaviconRow(hosts: List<String>, modifier: Modifier = Modifier) {
     val context = LocalContext.current
     LaunchedEffect(hosts) {
-        // Prefetch so the icons are ready before they are shown.
-        val loader = SingletonImageLoader.get(context)
+        val loader = coil3.SingletonImageLoader.get(context)
         hosts.take(6).forEach { host ->
             runCatching {
-                loader.enqueue(
-                    ImageRequest.Builder(context).data(faviconUrl(host)).build(),
-                )
+                loader.enqueue(ImageRequest.Builder(context).data(faviconUrl(host)).build())
             }
         }
     }
     Row(
+        modifier = modifier,
         horizontalArrangement = Arrangement.spacedBy(6.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -716,29 +710,51 @@ private fun parseSearchResults(text: String): List<SearchResult> {
 
 private val NUMERIC_ENTRY = Regex("^\\d+\\.\\s*(.*)$")
 
-/** Best-effort extraction of a string argument from a JSON-ish tool-call arguments string. */
-private fun jsonStringArg(arguments: String, key: String): String? {
-    val match = Regex("\"$key\"\\s*:\\s*\"((?:\\\\.|[^\"\\\\])*)\"").find(arguments) ?: return null
-    return match.groupValues[1]
-        .replace("\\\"", "\"")
-        .replace("\\\\", "\\")
-        .ifBlank { null }
+private fun mimeFor(filename: String): String = when (filename.substringAfterLast('.', "").lowercase()) {
+    "txt" -> "text/plain"
+    "md" -> "text/markdown"
+    "csv" -> "text/csv"
+    "json" -> "application/json"
+    "html", "htm" -> "text/html"
+    "xml" -> "text/xml"
+    "svg" -> "image/svg+xml"
+    "png" -> "image/png"
+    "jpg", "jpeg" -> "image/jpeg"
+    "pdf" -> "application/pdf"
+    "py" -> "text/x-python"
+    "kt" -> "text/x-kotlin"
+    "js" -> "text/javascript"
+    "sh" -> "text/x-shellscript"
+    else -> "application/octet-stream"
 }
+
+private val toolJson = Json { ignoreUnknownKeys = true; isLenient = true }
+
+/** Parses a string argument from a tool-call arguments JSON. */
+private fun jsonArg(arguments: String, key: String): String? =
+    runCatching {
+        toolJson.parseToJsonElement(arguments).jsonObject[key]?.jsonPrimitive?.contentOrNull
+    }.getOrNull()
 
 /** A short human-readable summary of a tool call's arguments. */
 private fun toolSummary(arguments: String): String {
-    for (key in listOf("query", "location", "expression", "input", "text")) {
-        jsonStringArg(arguments, key)?.let { return it }
+    for (key in listOf("query", "location", "expression", "code", "filename", "input", "text")) {
+        jsonArg(arguments, key)?.let { value ->
+            val firstLine = value.lineSequence().firstOrNull()?.trim().orEmpty()
+            if (firstLine.isNotBlank()) return firstLine.take(80)
+        }
     }
-    return arguments.trim().trim('{', '}', ' ')
+    return arguments.trim().trim('{', '}', ' ').take(80)
 }
 
 private fun toolLabel(name: String): String = when (name) {
-    WebSearchTool.NAME -> "Web search"
-    "get_current_time" -> "Date & time"
-    "get_weather" -> "Weather"
-    "wikipedia_summary" -> "Wikipedia"
-    "calculate" -> "Calculator"
+    WebSearchTool.NAME -> "Searched the web"
+    "get_current_time" -> "Checked the time"
+    "get_weather" -> "Checked the weather"
+    "wikipedia_summary" -> "Looked up Wikipedia"
+    "calculate" -> "Calculated"
+    "run_python" -> "Ran Python"
+    FileTool.NAME -> "Created a file"
     else -> name
 }
 
@@ -748,6 +764,8 @@ private fun toolIcon(name: String) = when (name) {
     "get_weather" -> Icons.Default.Cloud
     "wikipedia_summary" -> Icons.Default.MenuBook
     "calculate" -> Icons.Default.Calculate
+    "run_python" -> Icons.Default.Terminal
+    FileTool.NAME -> Icons.Default.InsertDriveFile
     else -> Icons.Default.Build
 }
 

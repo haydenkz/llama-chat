@@ -35,7 +35,7 @@ class WikipediaTool(
                 ?.get("title")?.jsonPrimitive?.contentOrNull
         }.getOrNull() ?: return "No Wikipedia article found for \"$query\"."
 
-        val summary = client.getText("https://en.wikipedia.org/api/rest_v1/page/summary/${urlEncode(title)}")
+        val summary = client.getText("https://en.wikipedia.org/api/rest_v1/page/summary/${urlEncodePath(title)}")
         val body = runCatching { json.parseToJsonElement(summary).jsonObject }.getOrNull()
             ?: return "Could not load the Wikipedia article \"$title\"."
 

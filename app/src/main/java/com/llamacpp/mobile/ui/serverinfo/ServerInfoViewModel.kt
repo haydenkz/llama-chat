@@ -22,7 +22,7 @@ data class ServerInfoUiState(
     val selectedModel: String? = null,
     val slotsJson: String? = null,
     val slotsError: String? = null,
-    val metricsJson: String? = null,
+    val metricsText: String? = null,
     val metricsError: String? = null,
     val loading: Boolean = false,
     val error: String? = null,
@@ -48,7 +48,7 @@ class ServerInfoViewModel(
     }
 
     fun selectModel(model: String) {
-        _state.update { it.copy(selectedModel = model, slotsJson = null, metricsJson = null, metricsError = null) }
+        _state.update { it.copy(selectedModel = model, slotsJson = null, metricsText = null, metricsError = null) }
         loadRuntime(model)
     }
 
@@ -80,13 +80,14 @@ class ServerInfoViewModel(
                 )
             }
 
-            runCatching { api.rawJson(server, "/metrics", model) }
-                .onSuccess { element ->
-                    _state.update { it.copy(metricsJson = pretty(element), metricsError = null) }
-                }
-                .onFailure { t ->
-                    _state.update { it.copy(metricsJson = null, metricsError = t.message) }
-                }
+            // `/metrics` is Prometheus text, not JSON.
+            val metrics = runCatching { api.rawText(server, "/metrics", model) }
+            _state.update {
+                it.copy(
+                    metricsText = metrics.getOrNull(),
+                    metricsError = metrics.exceptionOrNull()?.message,
+                )
+            }
         }
     }
 
@@ -94,8 +95,4 @@ class ServerInfoViewModel(
         runCatching {
             prettyJson.encodeToString(JsonElement.serializer(), prettyJson.parseToJsonElement(raw))
         }.getOrDefault(raw)
-
-    private fun pretty(element: JsonElement): String =
-        runCatching { prettyJson.encodeToString(JsonElement.serializer(), element) }
-            .getOrDefault(element.toString())
 }

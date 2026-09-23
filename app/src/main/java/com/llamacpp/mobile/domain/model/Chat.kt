@@ -42,6 +42,8 @@ data class ChatMessage(
     /** For [ChatRole.Tool] results: the call they answer. */
     val toolCallId: String? = null,
     val toolName: String? = null,
+    /** One-line summary of the model's reasoning for this turn. */
+    val thinkingSummary: String? = null,
     val error: String? = null,
 )
 

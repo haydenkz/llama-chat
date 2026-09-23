@@ -23,3 +23,7 @@ internal suspend fun OkHttpClient.getText(url: String): String = withContext(Dis
 }
 
 internal fun urlEncode(value: String): String = java.net.URLEncoder.encode(value, "UTF-8")
+
+/** Encode a URL *path* segment: spaces become %20 (a `+` is literal in a path). */
+internal fun urlEncodePath(value: String): String =
+    java.net.URLEncoder.encode(value, "UTF-8").replace("+", "%20")

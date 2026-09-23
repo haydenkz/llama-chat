@@ -1,12 +1,16 @@
 package com.llamacpp.mobile.ui
 
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.ui.Modifier
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.llamacpp.mobile.di.AppContainer
 import com.llamacpp.mobile.domain.model.ThemeMode
 import com.llamacpp.mobile.ui.navigation.AppNavHost
+import com.llamacpp.mobile.ui.onboarding.OnboardingScreen
 import com.llamacpp.mobile.ui.theme.LlamaChatTheme
 
 @Composable
@@ -21,6 +25,13 @@ fun LlamaRoot(container: AppContainer) {
     }
 
     LlamaChatTheme(darkTheme = darkTheme) {
-        AppNavHost(container)
+        val onboardingCompleted by container.settingsRepository.onboardingCompleted
+            .collectAsStateWithLifecycle(initialValue = null)
+
+        when (onboardingCompleted) {
+            null -> Box(Modifier.fillMaxSize())
+            false -> OnboardingScreen(container)
+            true -> AppNavHost(container)
+        }
     }
 }

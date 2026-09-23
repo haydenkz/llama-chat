@@ -20,14 +20,22 @@ class SettingsRepository(
     private val themeKey = stringPreferencesKey("theme_mode")
     private val hapticsKey = booleanPreferencesKey("haptics_while_generating")
     private val disabledToolsKey = stringSetPreferencesKey("disabled_tools")
+    private val pistonUrlKey = stringPreferencesKey("piston_url")
+    private val onboardingKey = booleanPreferencesKey("onboarding_completed")
 
     val themeMode: Flow<ThemeMode> = dataStore.data.map { ThemeMode.from(it[themeKey]) }
 
-    /** Subtle tick per streamed chunk while generating (ChatGPT-style). */
+    /** Subtle tick per streamed chunk while generating. */
     val hapticsWhileGenerating: Flow<Boolean> = dataStore.data.map { it[hapticsKey] ?: true }
 
     /** Tools the user has switched off (all tools are on by default). */
     val disabledTools: Flow<Set<String>> = dataStore.data.map { it[disabledToolsKey] ?: emptySet() }
+
+    /** Base URL of a self-hosted Piston instance used by the Python tool. */
+    val pistonUrl: Flow<String> = dataStore.data.map { it[pistonUrlKey] ?: "" }
+
+    /** False until the user has completed first-run setup. */
+    val onboardingCompleted: Flow<Boolean> = dataStore.data.map { it[onboardingKey] ?: false }
 
     /** Per-model sampler settings, or null when the user hasn't customized them. */
     fun savedSampler(model: String?): Flow<SamplerSettings?> = dataStore.data.map { prefs ->
@@ -63,6 +71,14 @@ class SettingsRepository(
             val current = prefs[disabledToolsKey] ?: emptySet()
             prefs[disabledToolsKey] = if (enabled) current - name else current + name
         }
+    }
+
+    suspend fun setPistonUrl(url: String) {
+        dataStore.edit { it[pistonUrlKey] = url.trim() }
+    }
+
+    suspend fun setOnboardingCompleted(completed: Boolean) {
+        dataStore.edit { it[onboardingKey] = completed }
     }
 
     private fun decodeSamplers(raw: String?): Map<String, SamplerSettings> =

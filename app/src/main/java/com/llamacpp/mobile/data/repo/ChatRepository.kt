@@ -214,6 +214,8 @@ internal fun buildSystemPrompt(systemPrompt: String, toolsEnabled: Boolean): Str
         append("Current date and time: ")
             .append(ZonedDateTime.now().format(dateTimeFormat))
             .append(". Use this to interpret relative dates such as \"today\", \"latest\" or \"last week\".\n\n")
+        append("When a tool is needed, call it directly and keep going; do not narrate between tool calls. ")
+            .append("Only write your final answer once you have everything you need.\n\n")
     }
     append(systemPrompt)
 }.trim()

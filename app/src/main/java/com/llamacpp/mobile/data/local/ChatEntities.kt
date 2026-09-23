@@ -38,6 +38,7 @@ data class MessageEntity(
     val toolCallsJson: String,
     val toolCallId: String?,
     val toolName: String?,
+    val thinkingSummary: String?,
     val error: String?,
 )
 
@@ -80,6 +81,7 @@ fun MessageEntity.toDomain(json: Json): ChatMessage = ChatMessage(
     toolCalls = runCatching { json.decodeFromString(toolCallListSerializer, toolCallsJson) }.getOrDefault(emptyList()),
     toolCallId = toolCallId,
     toolName = toolName,
+    thinkingSummary = thinkingSummary,
     error = error,
 )
 
@@ -99,5 +101,6 @@ fun ChatMessage.toEntity(json: Json): MessageEntity = MessageEntity(
     toolCallsJson = json.encodeToString(toolCallListSerializer, toolCalls),
     toolCallId = toolCallId,
     toolName = toolName,
+    thinkingSummary = thinkingSummary,
     error = error,
 )

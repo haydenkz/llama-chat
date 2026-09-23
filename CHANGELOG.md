@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-09-22
+
+### Added
+
+- Work-mode UI: a live **Thinking** status (elapsed time + expandable summary) and
+  compact, collapsible **tool chips**; generated files appear in a section at the
+  end of the turn.
+- **Python** tool (`run_python`) that executes code in a self-hosted Piston
+  sandbox, with timeouts.
+- **File creation** tool (`create_file`) — files are downloadable/saveable.
+- First-run **setup wizard** (server + model).
+- Model-generated **reasoning summaries**.
+
+### Changed
+
+- Web search results show site **favicons** and are grouped per turn.
+- The answer streams live again; scrolling up stops auto-follow, and streaming is
+  scoped to its own conversation so switching chats works during generation.
+- Removed the Completion tab.
+
+### Fixed
+
+- **Wikipedia** tool (URL path encoding produced 404s).
+- Chat **titles/summaries** on reasoning models (token budget + reasoning fallback).
+- The **end-of-turn scroll jump**.
+- Server **metrics** (the endpoint returns Prometheus text, not JSON).
+
 ## [0.1.7] - 2026-09-22
 
 ### Fixed
@@ -108,10 +135,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Image input for vision-capable models.
 - Local conversation history (Room) and settings (DataStore).
 - Dark/light theme ported from the llama.cpp web UI (`oklch` → Compose colors).
-- ChatGPT-style haptics while generating (toggleable).
+- Subtle haptics while generating (toggleable).
 - GitHub Actions CI and tag-based release workflow.
 
-[Unreleased]: https://github.com/haydenkz/llama-chat/compare/v0.1.7...HEAD
+[Unreleased]: https://github.com/haydenkz/llama-chat/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/haydenkz/llama-chat/releases/tag/v0.2.0
 [0.1.7]: https://github.com/haydenkz/llama-chat/releases/tag/v0.1.7
 [0.1.6]: https://github.com/haydenkz/llama-chat/releases/tag/v0.1.6
 [0.1.5]: https://github.com/haydenkz/llama-chat/releases/tag/v0.1.5

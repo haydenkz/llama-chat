@@ -62,6 +62,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.llamacpp.mobile.di.AppContainer
 import com.llamacpp.mobile.domain.model.ChatMessage
 import com.llamacpp.mobile.domain.model.ChatRole
+import com.llamacpp.mobile.domain.model.ToolCall
 import com.llamacpp.mobile.ui.appVmFactory
 import kotlinx.coroutines.launch
 
@@ -111,11 +112,15 @@ fun ChatScreen(
         if (showModelPicker) vm.refreshModels()
     }
 
-    // ChatGPT-style subtle tick per streamed chunk while generating.
+    // Subtle tick per streamed chunk while generating.
     val view = LocalView.current
     val lastHaptic = remember { mutableStateOf(0L) }
     LaunchedEffect(state.streamContent.length, state.isStreaming) {
-        if (state.isStreaming && hapticsEnabled && state.streamContent.isNotEmpty()) {
+        if (state.isStreaming &&
+            state.streamingConversationId == state.selectedId &&
+            hapticsEnabled &&
+            state.streamContent.isNotEmpty()
+        ) {
             val now = SystemClock.elapsedRealtime()
             if (now - lastHaptic.value >= 24L) {
                 lastHaptic.value = now
@@ -132,6 +137,7 @@ fun ChatScreen(
                 serverOnline = state.serverOnline,
                 conversations = state.conversations,
                 selectedId = state.selectedId,
+                workingConversationId = state.streamingConversationId,
                 onNewChat = {
                     vm.newConversation()
                     scope.launch { drawerState.close() }
@@ -324,14 +330,16 @@ private fun MessageList(
 ) {
     val context = LocalContext.current
     val listState = rememberLazyListState()
+    // Only the conversation being generated shows streaming content.
+    val streamingHere = state.isStreaming && state.selectedId == state.streamingConversationId
 
     val toolResults = remember(state.messages) {
         state.messages.filter { it.role == ChatRole.Tool }.associateBy { it.toolCallId.orEmpty() }
     }
 
-    val displayItems: List<ChatItem> = remember(state.messages, state.isStreaming) {
+    val displayItems: List<ChatItem> = remember(state.messages, streamingHere) {
         val grouped = groupIntoTurns(state.messages)
-        if (state.isStreaming && grouped.lastOrNull() !is ChatItem.Assistant) {
+        if (streamingHere && grouped.lastOrNull() !is ChatItem.Assistant) {
             val lastUserId = state.messages.lastOrNull { it.role == ChatRole.User }?.id ?: -1L
             grouped + ChatItem.Assistant(AssistantTurn(id = lastUserId, messages = emptyList()))
         } else {
@@ -359,8 +367,10 @@ private fun MessageList(
         }
     }
 
-    LaunchedEffect(state.messages.size, state.isStreaming) {
-        if (state.isStreaming || state.messages.lastOrNull()?.role == ChatRole.User) {
+    // Only a newly-sent user message forces a jump to the bottom. During generation
+    // we never yank the list, so scrolling up stops auto-follow.
+    LaunchedEffect(state.messages.size) {
+        if (state.messages.lastOrNull()?.role == ChatRole.User) {
             autoFollow = true
             listState.animateScrollToItem(0)
         }
@@ -429,10 +439,9 @@ private fun MessageList(
                     AssistantTurnView(
                         turn = item.turn,
                         toolResults = toolResults,
-                        isStreaming = isLast && state.isStreaming,
-                        streamingContent = if (isLast && state.isStreaming) state.streamContent else "",
-                        streamingReasoning = if (isLast && state.isStreaming) state.streamReasoning else "",
-                        listState = listState,
+                        isStreaming = isLast && streamingHere,
+                        streamingContent = if (isLast && streamingHere) state.streamContent else "",
+                        streamingReasoning = if (isLast && streamingHere) state.streamReasoning else "",
                         canRegenerate = isLast && !state.isStreaming,
                         onCopy = copyMessage,
                         onRegenerate = onRegenerate,
