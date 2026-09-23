@@ -14,7 +14,8 @@ class ToolRegistry(private val tools: List<ChatTool>) {
         tools.filter { it.name in enabled }.map { it.definition() }
 
     suspend fun execute(call: ToolCall): String {
-        val tool = byName(call.name) ?: return "Unknown tool: ${call.name}"
+        val tool = byName(call.name)
+            ?: return "Unknown tool \"${call.name}\". Available tools: ${tools.joinToString { it.name }}."
         return runCatching { tool.execute(call.arguments) }
             .getOrElse { "Tool \"${tool.displayName}\" failed: ${it.message}" }
     }

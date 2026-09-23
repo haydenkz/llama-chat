@@ -1,5 +1,9 @@
 package com.llamacpp.mobile.ui.chat
 
+import android.content.Context
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.net.Uri
 import android.util.Base64
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -32,38 +36,52 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalFocusManager
-import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.unit.dp
 import com.llamacpp.mobile.ui.theme.LocalLlamaColors
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.io.ByteArrayOutputStream
 
+/** Most images that can be attached to one message. */
+private const val MAX_ATTACHMENTS = 4
+private const val JPEG_QUALITY = 85
+
+/**
+ * The composer. The draft is hoisted so it survives rotation and can be
+ * pre-filled by starter suggestions; attachments stay internal (data URIs are
+ * large and not `Saveable`-friendly).
+ *
+ * `generatingHere` shows Stop; `generatingElsewhere` keeps Send but disables it,
+ * since one generation runs at a time and it belongs to another conversation.
+ */
 @Composable
 fun ChatInputBar(
-    isStreaming: Boolean,
+    text: String,
+    onTextChange: (String) -> Unit,
+    generatingHere: Boolean,
+    generatingElsewhere: Boolean,
     modelSelected: Boolean,
     supportsVision: Boolean,
-    onSend: (String, List<String>) -> Unit,
+    onSubmit: (text: String, images: List<String>) -> Unit,
     onStop: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
-    val keyboardController = LocalSoftwareKeyboardController.current
-    val focusManager = LocalFocusManager.current
-    var text by remember { mutableStateOf("") }
+    val scope = rememberCoroutineScope()
     var attachments by remember { mutableStateOf(listOf<String>()) }
 
     val pickImage = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
-        if (uri != null) {
-            val bytes = context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
-            if (bytes != null) {
-                val mime = context.contentResolver.getType(uri) ?: "image/png"
-                val dataUri = "data:$mime;base64," + Base64.encodeToString(bytes, Base64.NO_WRAP)
-                attachments = attachments + dataUri
-            }
+        if (uri == null || attachments.size >= MAX_ATTACHMENTS) return@rememberLauncherForActivityResult
+        scope.launch {
+            // Decode and re-encode off the main thread; an unreadable pick is ignored.
+            val dataUri = withContext(Dispatchers.IO) { runCatching { encodeAttachment(context, uri) }.getOrNull() }
+            if (dataUri != null && attachments.size < MAX_ATTACHMENTS) attachments = attachments + dataUri
         }
     }
 
@@ -96,16 +114,25 @@ fun ChatInputBar(
 
             Row(verticalAlignment = Alignment.Bottom) {
                 if (supportsVision) {
-                    IconButton(onClick = { pickImage.launch("image/*") }) {
+                    IconButton(
+                        onClick = { pickImage.launch("image/*") },
+                        enabled = attachments.size < MAX_ATTACHMENTS,
+                    ) {
                         Icon(Icons.Default.AddPhotoAlternate, "Attach image")
                     }
                 }
                 TextField(
                     value = text,
-                    onValueChange = { text = it },
+                    onValueChange = onTextChange,
                     modifier = Modifier.weight(1f),
                     placeholder = {
-                        Text(if (modelSelected) "Message" else "Select a model to chat")
+                        Text(
+                            when {
+                                generatingElsewhere -> "Generating in another chat…"
+                                !modelSelected -> "Select a model to chat"
+                                else -> "Message"
+                            },
+                        )
                     },
                     maxLines = 6,
                     shape = RoundedCornerShape(20.dp),
@@ -118,27 +145,55 @@ fun ChatInputBar(
                     ),
                 )
                 Spacer(Modifier.width(6.dp))
-                if (isStreaming) {
+                if (generatingHere) {
                     FilledIconButton(onClick = onStop) {
                         Icon(Icons.Default.Stop, "Stop")
                     }
                 } else {
+                    val hasContent = text.isNotBlank() || attachments.isNotEmpty()
                     FilledIconButton(
                         onClick = {
-                            if (text.isNotBlank() || attachments.isNotEmpty()) {
-                                onSend(text.trim(), attachments)
-                                text = ""
+                            if (hasContent) {
+                                onSubmit(text.trim(), attachments)
                                 attachments = emptyList()
-                                focusManager.clearFocus()
-                                keyboardController?.hide()
                             }
                         },
-                        enabled = modelSelected && (text.isNotBlank() || attachments.isNotEmpty()),
+                        enabled = modelSelected && !generatingElsewhere && hasContent,
                     ) {
                         Icon(Icons.Default.Send, "Send")
                     }
                 }
             }
         }
+    }
+}
+
+/**
+ * Reads a picked image bounded to [MAX_IMAGE_EDGE_PX] on its longest edge and
+ * returns it as a `data:` URI. JPEG at [JPEG_QUALITY] unless the source is a PNG
+ * with transparency, which stays PNG. Throws on an unreadable URI.
+ */
+private fun encodeAttachment(context: Context, uri: Uri): String {
+    val resolver = context.contentResolver
+    val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+    resolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, bounds) }
+        ?: throw IllegalStateException("Cannot open $uri")
+    val options = BitmapFactory.Options().apply {
+        inSampleSize = sampleSizeFor(bounds.outWidth, bounds.outHeight, MAX_IMAGE_EDGE_PX)
+    }
+    val bitmap = resolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, options) }
+        ?: throw IllegalStateException("Cannot decode $uri")
+    try {
+        val keepPng = resolver.getType(uri) == "image/png" && bitmap.hasAlpha()
+        val mime = if (keepPng) "image/png" else "image/jpeg"
+        val out = ByteArrayOutputStream()
+        if (keepPng) {
+            bitmap.compress(Bitmap.CompressFormat.PNG, 100, out)
+        } else {
+            bitmap.compress(Bitmap.CompressFormat.JPEG, JPEG_QUALITY, out)
+        }
+        return "data:$mime;base64," + Base64.encodeToString(out.toByteArray(), Base64.NO_WRAP)
+    } finally {
+        bitmap.recycle()
     }
 }

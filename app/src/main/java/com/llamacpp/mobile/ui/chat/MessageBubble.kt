@@ -8,12 +8,20 @@ import android.util.Base64
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.ui.unit.isSpecified
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.animation.togetherWith
+import androidx.compose.animation.core.MutableTransitionState
+import androidx.compose.animation.SizeTransform
+import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.keyframes
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.expandVertically
@@ -23,6 +31,7 @@ import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -44,6 +53,7 @@ import androidx.compose.material.icons.filled.Calculate
 import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.InsertDriveFile
 import androidx.compose.material.icons.filled.MenuBook
 import androidx.compose.material.icons.filled.Refresh
@@ -51,6 +61,8 @@ import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -59,14 +71,19 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -78,6 +95,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
 import coil3.request.ImageRequest
@@ -91,44 +109,78 @@ import com.llamacpp.mobile.ui.theme.CodeTextStyle
 import com.llamacpp.mobile.ui.util.formatBytes
 import com.llamacpp.mobile.ui.util.formatDuration
 import com.llamacpp.mobile.ui.util.formatSpeed
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 
 /** A run of assistant/tool messages between two user messages. */
+@Immutable
 data class AssistantTurn(
     val id: Long,
     val messages: List<ChatMessage>,
 )
 
 @Composable
-fun UserBubble(message: ChatMessage, modifier: Modifier = Modifier) {
+fun UserBubble(
+    message: ChatMessage,
+    onCopy: () -> Unit,
+    onEdit: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    var menu by remember { mutableStateOf(false) }
     Row(modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp)) {
         Spacer(Modifier.weight(1f))
-        Surface(
-            shape = RoundedCornerShape(16.dp),
-            color = MaterialTheme.colorScheme.surfaceContainerHigh,
-            contentColor = MaterialTheme.colorScheme.onSurface,
-            modifier = Modifier.widthIn(max = 320.dp),
-        ) {
-            Column(Modifier.padding(horizontal = 14.dp, vertical = 10.dp)) {
-                message.images.forEach { uri ->
-                    DataUriImage(uri, Modifier.fillMaxWidth().padding(bottom = 6.dp))
+        Box {
+            Surface(
+                shape = RoundedCornerShape(16.dp),
+                color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                contentColor = MaterialTheme.colorScheme.onSurface,
+                modifier = Modifier
+                    .widthIn(max = 320.dp)
+                    .clip(RoundedCornerShape(16.dp))
+                    .combinedClickable(onClick = {}, onLongClick = { menu = true }),
+            ) {
+                Column(Modifier.padding(horizontal = 14.dp, vertical = 10.dp)) {
+                    message.images.forEach { uri ->
+                        DataUriImage(uri, Modifier.fillMaxWidth().padding(bottom = 6.dp))
+                    }
+                    if (message.content.isNotBlank()) {
+                        Text(text = message.content, style = MaterialTheme.typography.bodyLarge)
+                    }
                 }
-                if (message.content.isNotBlank()) {
-                    Text(text = message.content, style = MaterialTheme.typography.bodyLarge)
+            }
+            DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                DropdownMenuItem(
+                    text = { Text("Copy") },
+                    leadingIcon = { Icon(Icons.Default.ContentCopy, null) },
+                    onClick = { menu = false; onCopy() },
+                )
+                if (message.role == ChatRole.User) {
+                    DropdownMenuItem(
+                        text = { Text("Edit") },
+                        leadingIcon = { Icon(Icons.Default.Edit, null) },
+                        onClick = { menu = false; onEdit() },
+                    )
                 }
             }
         }
     }
 }
 
+/** One entry in a turn's work log: something the model thought or a tool it called. */
+private sealed interface WorkStep {
+    data class Thought(val text: String) : WorkStep
+    data class Tool(val call: ToolCall) : WorkStep
+}
+
 /**
- * Renders an assistant turn in work-mode style: a **thinking** status line
- * (shimmer while working → "Thought for Xs" with a short summary), compact **tool
- * chips**, the **answer** (streams live), then a **Files** section.
+ * Renders an assistant turn: a collapsible **work** section (live status while
+ * the model thinks and calls tools, expanding to an ordered log of its thoughts
+ * and tool calls), the **answer** (streams live), then a **Files** section.
  */
 @Composable
 fun AssistantTurnView(
@@ -137,110 +189,127 @@ fun AssistantTurnView(
     isStreaming: Boolean,
     streamingContent: String,
     streamingReasoning: String,
+    /** Tool calls still being written by the model (streaming only). */
+    streamingToolCalls: List<ToolCall>,
+    /** Thinking time accumulated so far this turn (streaming only). */
+    streamingThinkingMs: Long,
+    /** Start of the live thinking span, or null while answer text streams. */
+    streamingThinkingSince: Long?,
     canRegenerate: Boolean,
     onCopy: (ChatMessage) -> Unit,
     onRegenerate: () -> Unit,
+    onRetry: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    // Only assistant text can be the answer: a tool result row also has content and no calls.
     val finalAnswer = remember(turn.messages) {
-        turn.messages.lastOrNull { it.content.isNotBlank() && it.toolCalls.isEmpty() }
+        turn.messages.lastOrNull { it.role == ChatRole.Assistant && it.content.isNotBlank() && it.toolCalls.isEmpty() }
     }
-    val allToolCalls = remember(turn.messages) { turn.messages.flatMap { it.toolCalls } }
-    val fileCalls = remember(allToolCalls) { allToolCalls.filter { it.name == FileTool.NAME } }
+    val fileCalls = remember(turn.messages) {
+        turn.messages.flatMap { it.toolCalls }.filter { it.name == FileTool.NAME }
+    }
     val error = remember(turn.messages) { turn.messages.firstNotNullOfOrNull { it.error } }
 
-    // Everything the model "worked through": reasoning + text it wrote between tools.
-    val detail = remember(turn.messages, streamingReasoning) {
+    // The work log in the order it happened: each pass's reasoning and narration,
+    // then the tools it called; the live pass goes last.
+    val steps = remember(turn.messages, streamingReasoning, streamingToolCalls) {
         buildList {
-            turn.messages.forEach { message ->
-                if (message.reasoning.isNotBlank()) add(message.reasoning)
-                if (message.content.isNotBlank() && message !== finalAnswer) add(message.content)
+            turn.messages.filter { it.role == ChatRole.Assistant }.forEach { message ->
+                val thought = listOf(message.reasoning, message.content.takeIf { message !== finalAnswer }.orEmpty())
+                    .map(::tidyThought)
+                    .filter(String::isNotBlank)
+                    .joinToString("\n\n")
+                if (thought.isNotBlank()) add(WorkStep.Thought(thought))
+                message.toolCalls.forEach { add(WorkStep.Tool(it)) }
             }
-            if (streamingReasoning.isNotBlank()) add(streamingReasoning)
-        }.joinToString("\n\n")
+            tidyThought(streamingReasoning).takeIf(String::isNotBlank)?.let { add(WorkStep.Thought(it)) }
+            streamingToolCalls.forEach { add(WorkStep.Tool(it)) }
+        }
     }
-    val summary = remember(turn.messages) {
-        turn.messages.firstNotNullOfOrNull { it.thinkingSummary }
-    }
-    val thoughtSeconds = remember(turn.messages) {
-        val first = turn.messages.firstOrNull()?.createdAt ?: return@remember 0L
-        val last = turn.messages.lastOrNull()?.createdAt ?: first
-        ((last - first) / 1000L).coerceAtLeast(0L)
-    }
+    val toolCount = steps.count { it is WorkStep.Tool }
+    val persistedThinkingMs = remember(turn.messages) { turn.messages.sumOf { it.thinkingMs ?: 0L } }
     // "Working" = the model is still going and hasn't produced answer text yet.
     val working = isStreaming && streamingContent.isBlank() && finalAnswer == null
 
-    // Live timer that keeps counting while the model works — including while it
-    // runs tools — instead of only updating when a message is persisted.
-    var elapsedSeconds by remember { mutableStateOf(0L) }
-    val turnStart = remember(turn.id) { System.currentTimeMillis() }
-    LaunchedEffect(isStreaming) {
-        while (isStreaming) {
-            elapsedSeconds = ((System.currentTimeMillis() - turnStart) / 1000L).coerceAtLeast(0L)
-            delay(1000L)
+    // Live clock, ticking only while a thinking span is open, so the counter shown
+    // while working is the same number the persisted "Thought for" ends on.
+    var now by remember { mutableStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(isStreaming, streamingThinkingSince) {
+        while (isStreaming && streamingThinkingSince != null) {
+            now = System.currentTimeMillis()
+            delay(250L)
         }
+    }
+    val thinkingMs = if (isStreaming) {
+        streamingThinkingMs + (streamingThinkingSince?.let { (now - it).coerceAtLeast(0L) } ?: 0L)
+    } else {
+        persistedThinkingMs
     }
 
     Column(modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp)) {
-        if (working) {
-            ThinkingStatus(working = true, durationSeconds = elapsedSeconds, summary = null, detail = null)
-        } else if (detail.isNotBlank()) {
-            ThinkingStatus(
-                working = false,
-                durationSeconds = thoughtSeconds,
-                summary = summary,
-                detail = detail,
-            )
+        // "Thinking" only appears once there is reasoning or a tool call; a reply
+        // that is simply waiting for its first token gets a neutral indicator.
+        // The dots and the header share one height, so swapping them never moves
+        // the answer; every other size change is animated inside the work section.
+        Column(Modifier.fillMaxWidth()) {
+            if (steps.isEmpty() && working) {
+                Box(Modifier.height(WORK_HEADER_HEIGHT), contentAlignment = Alignment.CenterStart) { PendingDots() }
+            } else if (steps.isNotEmpty()) {
+                WorkSection(
+                    steps = steps,
+                    toolResults = toolResults,
+                    working = working,
+                    turnActive = isStreaming,
+                    durationSeconds = thinkingMs / 1000L,
+                    toolCount = toolCount,
+                )
+            }
         }
 
-        allToolCalls.filter { it.name != FileTool.NAME }.forEach { call ->
-            ToolChip(call = call, result = toolResults[call.id])
-        }
-
-        if (isStreaming && streamingContent.isNotEmpty()) {
-            StreamingMarkdownText(content = streamingContent, modifier = Modifier.fillMaxWidth())
-        } else if (!isStreaming && finalAnswer != null) {
-            StreamingMarkdownText(content = finalAnswer.content, modifier = Modifier.fillMaxWidth())
+        // The live buffer wins while streaming; the persisted answer takes over in
+        // the same frame the buffer is cleared, so there is no gap between them.
+        val answer = if (isStreaming && streamingContent.isNotEmpty()) streamingContent else finalAnswer?.content
+        if (answer != null) {
+            StreamingMarkdownText(content = answer, modifier = Modifier.fillMaxWidth())
         }
 
         // Files only appear once the model has finished responding.
         if (!isStreaming && fileCalls.isNotEmpty()) {
-            Spacer(Modifier.height(4.dp))
-            Text(
-                text = "Files",
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Spacer(Modifier.height(6.dp))
+            Spacer(Modifier.height(8.dp))
             fileCalls.forEach { call ->
                 FileRow(call = call, result = toolResults[call.id])
             }
         }
 
         if (error != null) {
-            Text(
-                text = error,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.error,
-            )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = error,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                    modifier = Modifier.weight(1f),
+                )
+                if (!isStreaming) {
+                    TextButton(onClick = onRetry) { Text("Retry") }
+                }
+            }
         }
 
-        AnimatedVisibility(
-            visible = !isStreaming && finalAnswer != null,
-            enter = expandVertically() + fadeIn(),
-            exit = shrinkVertically() + fadeOut(),
-        ) {
-            if (finalAnswer != null) {
-                AnswerActions(
-                    message = finalAnswer,
-                    canRegenerate = canRegenerate,
-                    onCopy = { onCopy(finalAnswer) },
-                    onRegenerate = onRegenerate,
-                )
-            }
+        if (!isStreaming && finalAnswer != null) {
+            AnswerActions(
+                message = finalAnswer,
+                canRegenerate = canRegenerate,
+                onCopy = { onCopy(finalAnswer) },
+                onRegenerate = onRegenerate,
+            )
         }
     }
 }
+
+/** Collapses the blank-line runs models leave between narration chunks. */
+private fun tidyThought(text: String): String = text.trim().replace(BLANK_LINE_RUN, "\n\n")
+
+private val BLANK_LINE_RUN = Regex("""\n[ \t]*(\n[ \t]*)+""")
 
 @Composable
 private fun AnswerActions(
@@ -283,65 +352,262 @@ private fun AnswerActions(
     }
 }
 
-/** Thinking status line: shimmer while working, then "Thought for Xs" + summary. */
+/**
+ * The turn's work log. Collapsed it is one status line — shimmering with the
+ * current activity while working, "Thought for Xs · N tools" after — plus a
+ * one-line preview of the latest step while working. Expanded (manual toggle
+ * only, it never opens or closes on its own) it lists every thought and tool
+ * call in order.
+ */
 @Composable
-private fun ThinkingStatus(
+private fun WorkSection(
+    steps: List<WorkStep>,
+    toolResults: Map<String, ChatMessage>,
     working: Boolean,
+    turnActive: Boolean,
     durationSeconds: Long,
-    summary: String?,
-    detail: String?,
+    toolCount: Int,
 ) {
-    var expanded by remember { mutableStateOf(false) }
-    val expandedText = summary?.takeIf { it.isNotBlank() } ?: detail
-    val canExpand = !working && !expandedText.isNullOrBlank()
+    var expanded by rememberSaveable { mutableStateOf(false) }
+    val canExpand = steps.isNotEmpty()
+    val latest = steps.lastOrNull()
+    val runningTool = (latest as? WorkStep.Tool)?.call?.takeIf { turnActive && toolResults[it.id] == null }
 
-    Column(Modifier.fillMaxWidth().padding(vertical = 2.dp)) {
+    val label = when {
+        !working -> workSummary(durationSeconds, toolCount)
+        runningTool != null -> toolLabel(runningTool.name, running = true)
+        else -> "Thinking"
+    }
+
+    Column(Modifier.fillMaxWidth().padding(bottom = 4.dp)) {
+        // Fixed-height header: the label crossfades, the timer and chevron hold
+        // their place, so cycling through steps never shifts anything.
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .clickable(enabled = canExpand) { expanded = !expanded }
-                .padding(vertical = 4.dp),
+                .heightIn(min = WORK_HEADER_HEIGHT)
+                .clip(RoundedCornerShape(8.dp))
+                .clickable(enabled = canExpand) { expanded = !expanded },
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(6.dp),
         ) {
-            if (working) {
-                ShimmerText(text = "Thinking", modifier = Modifier.weight(1f))
-                Text(
-                    text = "${durationSeconds}s",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            } else {
-                Text(
-                    text = formatThought(durationSeconds),
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.weight(1f),
-                )
-                if (canExpand) {
+            AnimatedContent(
+                targetState = label to working,
+                transitionSpec = {
+                    fadeIn(tween(STEP_FADE_MS)) togetherWith fadeOut(tween(STEP_FADE_MS)) using SizeTransform(clip = false)
+                },
+                contentAlignment = Alignment.CenterStart,
+                modifier = Modifier.weight(1f),
+                label = "workLabel",
+            ) { (text, isWorking) ->
+                if (isWorking) {
+                    ShimmerText(text = text)
+                } else {
                     Text(
-                        text = if (expanded) "⌄" else "›",
-                        style = MaterialTheme.typography.titleMedium,
+                        text = text,
+                        style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
                     )
                 }
             }
-        }
-        if (canExpand) {
-            AnimatedVisibility(visible = expanded) {
+            if (working) {
                 Text(
-                    text = expandedText.orEmpty(),
-                    style = MaterialTheme.typography.bodySmall,
-                    fontStyle = FontStyle.Italic,
+                    text = "${durationSeconds}s",
+                    style = MaterialTheme.typography.labelMedium.copy(fontFeatureSettings = "tnum"),
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .heightIn(max = 320.dp)
-                        .verticalScroll(rememberScrollState())
-                        .padding(bottom = 6.dp),
+                )
+            }
+            if (canExpand) {
+                val rotation by animateFloatAsState(if (expanded) 180f else 0f, label = "workChevron")
+                Icon(
+                    imageVector = Icons.Default.ExpandMore,
+                    contentDescription = if (expanded) "Hide work" else "Show work",
+                    modifier = Modifier.size(18.dp).graphicsLayer { rotationZ = rotation },
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
         }
+
+        // While working, a fixed-height slot shows the current step: the raw thought
+        // pinned to its newest line, or the running tool's input. Steps crossfade
+        // in place; the slot's size never changes between them.
+        // Starts hidden so it slides in when thinking begins, on the same timing as
+        // everything else in this section.
+        val slotVisible = remember { MutableTransitionState(false) }
+        slotVisible.targetState = working && !expanded
+        AnimatedVisibility(
+            visibleState = slotVisible,
+            enter = expandVertically(workSizeSpec(), expandFrom = Alignment.Top) + fadeIn(tween(STEP_FADE_MS)),
+            exit = shrinkVertically(workSizeSpec(), shrinkTowards = Alignment.Top) + fadeOut(tween(STEP_FADE_MS)),
+        ) {
+            val lineHeight = MaterialTheme.typography.bodySmall.lineHeight
+                .takeIf { it.isSpecified } ?: MaterialTheme.typography.bodySmall.fontSize * 1.4f
+            val slotHeight = with(LocalDensity.current) { (lineHeight * LIVE_SLOT_LINES).toDp() }
+            AnimatedContent(
+                targetState = steps.lastIndex,
+                transitionSpec = {
+                    fadeIn(tween(STEP_FADE_MS)) togetherWith fadeOut(tween(STEP_FADE_MS)) using SizeTransform(clip = true)
+                },
+                modifier = Modifier.fillMaxWidth().height(slotHeight).padding(bottom = 2.dp),
+                label = "workStep",
+            ) { index ->
+                when (val step = steps.getOrNull(index)) {
+                    is WorkStep.Thought -> LiveThought(step.text)
+                    is WorkStep.Tool -> LiveTool(step.call, running = turnActive && toolResults[step.call.id] == null)
+                    null -> Spacer(Modifier.fillMaxSize())
+                }
+            }
+        }
+
+        AnimatedVisibility(
+            visible = expanded && canExpand,
+            enter = expandVertically(workSizeSpec(), expandFrom = Alignment.Top) + fadeIn(tween(STEP_FADE_MS)),
+            exit = shrinkVertically(workSizeSpec(), shrinkTowards = Alignment.Top) + fadeOut(tween(STEP_FADE_MS)),
+        ) {
+            Column(Modifier.fillMaxWidth().padding(top = 2.dp, bottom = 6.dp)) {
+                steps.forEach { step ->
+                    when (step) {
+                        is WorkStep.Thought -> ThoughtBlock(step.text)
+                        is WorkStep.Tool -> ToolChip(
+                            call = step.call,
+                            result = toolResults[step.call.id],
+                            turnActive = turnActive,
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** Three softly pulsing dots: the model is working but has produced nothing yet. */
+@Composable
+private fun PendingDots(modifier: Modifier = Modifier) {
+    val transition = rememberInfiniteTransition(label = "pendingDots")
+    val color = MaterialTheme.colorScheme.onSurfaceVariant
+    Row(modifier, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+        repeat(3) { index ->
+            val alpha by transition.animateFloat(
+                initialValue = 0.25f,
+                targetValue = 0.25f,
+                animationSpec = infiniteRepeatable(
+                    animation = keyframes {
+                        durationMillis = 1200
+                        0.25f at index * 150
+                        1f at index * 150 + 300
+                        0.25f at index * 150 + 600
+                    },
+                ),
+                label = "pendingDot$index",
+            )
+            Box(
+                Modifier
+                    .size(7.dp)
+                    .graphicsLayer { this.alpha = alpha }
+                    .background(color, CircleShape),
+            )
+        }
+    }
+}
+
+/** The current thought, verbatim, filling the live slot and pinned to its newest line. */
+@Composable
+private fun LiveThought(text: String) {
+    val scroll = rememberScrollState()
+    LaunchedEffect(scroll) { snapshotFlow { scroll.maxValue }.collect { scroll.scrollTo(it) } }
+    val fade = MaterialTheme.colorScheme.background
+    Box(Modifier.fillMaxSize()) {
+        Box(Modifier.fillMaxSize().verticalScroll(scroll, enabled = false)) {
+            ThoughtBlock(text, bottomPadding = 0.dp)
+        }
+        // Older lines fade out at the top edge instead of being cut.
+        if (scroll.value > 0) {
+            Box(
+                Modifier
+                    .fillMaxWidth()
+                    .height(14.dp)
+                    .background(Brush.verticalGradient(listOf(fade, fade.copy(alpha = 0f)))),
+            )
+        }
+    }
+}
+
+/** The running (or just-finished) tool's input, in the same slot as a thought. */
+@Composable
+private fun LiveTool(call: ToolCall, running: Boolean) {
+    Row(
+        modifier = Modifier.fillMaxSize(),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Box(Modifier.padding(top = 1.dp).size(14.dp), contentAlignment = Alignment.Center) {
+            if (running) {
+                CircularProgressIndicator(Modifier.size(12.dp), strokeWidth = 1.5.dp)
+            } else {
+                Icon(
+                    imageVector = toolIcon(call.name),
+                    contentDescription = null,
+                    modifier = Modifier.size(14.dp),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+        Text(
+            text = toolSummary(call.arguments),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = LIVE_SLOT_LINES,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
+
+private val WORK_HEADER_HEIGHT = 32.dp
+private const val LIVE_SLOT_LINES = 3
+private const val STEP_FADE_MS = 220
+
+/**
+ * The one size animation for the work section (live slot, expanded log). A single
+ * tween drives each resize, and the answer below simply follows the layout, so
+ * it moves in lockstep instead of trailing behind.
+ */
+private fun workSizeSpec() = tween<IntSize>(durationMillis = 260, easing = FastOutSlowInEasing)
+
+/** A thought in the work log: quiet italic text behind a thin rule. */
+@Composable
+private fun ThoughtBlock(text: String, bottomPadding: androidx.compose.ui.unit.Dp = 8.dp) {
+    val rule = MaterialTheme.colorScheme.outlineVariant
+    Text(
+        text = text,
+        style = MaterialTheme.typography.bodySmall,
+        fontStyle = FontStyle.Italic,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(bottom = bottomPadding)
+            .drawBehind {
+                drawRect(color = rule, size = androidx.compose.ui.geometry.Size(2.dp.toPx(), size.height))
+            }
+            .padding(start = 12.dp),
+    )
+}
+
+private fun workSummary(seconds: Long, tools: Int): String {
+    val toolText = when (tools) {
+        0 -> null
+        1 -> "1 tool"
+        else -> "$tools tools"
+    }
+    val thought = when {
+        seconds < 1L -> if (toolText != null) null else "Thought briefly"
+        seconds < 60L -> "Thought for ${seconds}s"
+        else -> "Thought for ${seconds / 60}m ${seconds % 60}s"
+    }
+    return when {
+        thought != null && toolText != null -> "$thought · $toolText"
+        toolText != null -> "Used $toolText"
+        else -> thought.orEmpty()
     }
 }
 
@@ -374,22 +640,17 @@ private fun ShimmerText(text: String, modifier: Modifier = Modifier) {
     )
 }
 
-private fun formatThought(seconds: Long): String = when {
-    seconds < 1L -> "Thought briefly"
-    seconds < 60L -> "Thought for ${seconds}s"
-    else -> "Thought for ${seconds / 60}m ${seconds % 60}s"
-}
-
 /**
  * A compact, collapsible tool chip. Web search keeps its favicons; other tools show
  * a one-line input and the output.
  */
 @Composable
-private fun ToolChip(call: ToolCall, result: ChatMessage?) {
-    val label = toolLabel(call.name)
+private fun ToolChip(call: ToolCall, result: ChatMessage?, turnActive: Boolean) {
     val summary = toolSummary(call.arguments)
-    val resultText = result?.content
-    val running = result == null
+    // A call that never got a result after the turn ended is shown as such, not as running.
+    val resultText = result?.content ?: if (turnActive) null else "(not run)"
+    val running = resultText == null
+    val label = toolLabel(call.name, running)
     var expanded by remember { mutableStateOf(false) }
 
     val isWeb = call.name == WebSearchTool.NAME
@@ -736,25 +997,40 @@ private fun jsonArg(arguments: String, key: String): String? =
         toolJson.parseToJsonElement(arguments).jsonObject[key]?.jsonPrimitive?.contentOrNull
     }.getOrNull()
 
-/** A short human-readable summary of a tool call's arguments. */
+private val SUMMARY_KEYS = listOf("query", "location", "expression", "code", "filename", "title", "input", "text")
+
+/**
+ * A short human-readable summary of a tool call's arguments. Works on partial
+ * JSON too, so a call the model is still writing already shows its input.
+ */
 private fun toolSummary(arguments: String): String {
-    for (key in listOf("query", "location", "expression", "code", "filename", "input", "text")) {
-        jsonArg(arguments, key)?.let { value ->
-            val firstLine = value.lineSequence().firstOrNull()?.trim().orEmpty()
-            if (firstLine.isNotBlank()) return firstLine.take(80)
-        }
+    for (key in SUMMARY_KEYS) {
+        val value = jsonArg(arguments, key) ?: partialStringArg(arguments, key)
+        val firstLine = value?.lineSequence()?.firstOrNull { it.isNotBlank() }?.trim().orEmpty()
+        if (firstLine.isNotBlank()) return firstLine.take(80)
     }
-    return arguments.trim().trim('{', '}', ' ').take(80)
+    if (arguments.trimStart().startsWith("{")) return ""
+    return arguments.trim().take(80)
 }
 
-private fun toolLabel(name: String): String = when (name) {
-    WebSearchTool.NAME -> "Searched the web"
-    "get_current_time" -> "Checked the time"
-    "get_weather" -> "Checked the weather"
-    "wikipedia_summary" -> "Looked up Wikipedia"
-    "calculate" -> "Calculated"
-    "run_python" -> "Ran Python"
-    FileTool.NAME -> "Created a file"
+/** A string value that may still be unterminated: `{"query": "weather in Par`. */
+private fun partialStringArg(arguments: String, key: String): String? =
+    Regex("\"" + Regex.escape(key) + "\"\\s*:\\s*\"((?:\\\\.|[^\"\\\\])*)")
+        .find(arguments)
+        ?.groupValues?.get(1)
+        ?.replace("\\n", "\n")
+        ?.replace("\\\"", "\"")
+        ?.replace("\\\\", "\\")
+
+/** Present tense while the tool runs, past tense once it has a result. */
+private fun toolLabel(name: String, running: Boolean = false): String = when (name) {
+    WebSearchTool.NAME -> if (running) "Searching the web" else "Searched the web"
+    "get_current_time" -> if (running) "Checking the time" else "Checked the time"
+    "get_weather" -> if (running) "Checking the weather" else "Checked the weather"
+    "wikipedia_summary" -> if (running) "Looking up Wikipedia" else "Looked up Wikipedia"
+    "calculate" -> if (running) "Calculating" else "Calculated"
+    "run_python" -> if (running) "Running Python" else "Ran Python"
+    FileTool.NAME -> if (running) "Writing a file" else "Created a file"
     else -> name
 }
 
@@ -769,21 +1045,47 @@ private fun toolIcon(name: String) = when (name) {
     else -> Icons.Default.Build
 }
 
+/**
+ * Renders a `data:` image. Decoding happens off the main thread and is bounded to
+ * ~1024 px on the longest edge so full-size photos stored by older versions cannot
+ * stall a frame or exhaust memory.
+ */
 @Composable
 fun DataUriImage(dataUri: String, modifier: Modifier = Modifier) {
-    val bitmap: ImageBitmap? = remember(dataUri) {
-        runCatching {
-            val encoded = dataUri.substringAfter("base64,", "")
-            val bytes = Base64.decode(encoded, Base64.DEFAULT)
-            BitmapFactory.decodeByteArray(bytes, 0, bytes.size)?.asImageBitmap()
-        }.getOrNull()
+    val bitmap by produceState<ImageBitmap?>(initialValue = null, dataUri) {
+        value = withContext(Dispatchers.Default) {
+            runCatching {
+                val encoded = dataUri.substringAfter("base64,", "")
+                val bytes = Base64.decode(encoded, Base64.DEFAULT)
+                val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
+                val options = BitmapFactory.Options().apply {
+                    inSampleSize = sampleSizeFor(bounds.outWidth, bounds.outHeight, MAX_IMAGE_EDGE_PX)
+                }
+                BitmapFactory.decodeByteArray(bytes, 0, bytes.size, options)?.asImageBitmap()
+            }.getOrNull()
+        }
     }
-    if (bitmap != null) {
+    bitmap?.let {
         Image(
-            bitmap = bitmap,
+            bitmap = it,
             contentDescription = null,
             contentScale = ContentScale.Fit,
             modifier = modifier.clip(RoundedCornerShape(8.dp)),
         )
     }
+}
+
+/** Longest edge, in pixels, that attached and displayed images are bounded to. */
+internal const val MAX_IMAGE_EDGE_PX = 1024
+
+/** Power-of-two `inSampleSize` that brings the longest edge to at most `maxEdge`. */
+internal fun sampleSizeFor(width: Int, height: Int, maxEdge: Int): Int {
+    var sample = 1
+    var longest = maxOf(width, height)
+    while (longest / 2 >= maxEdge) {
+        longest /= 2
+        sample *= 2
+    }
+    return sample
 }

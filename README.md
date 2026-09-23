@@ -9,12 +9,12 @@ A native Android client for [llama.cpp](https://github.com/ggml-org/llama.cpp) `
 ## Features
 
 - **Streaming chat** with markdown rendering, syntax-highlighted code blocks, and copy/edit/regenerate per message.
-- **Work-mode UI** — a live "Thinking" indicator (elapsed time, expandable summary) while the model reasons or runs tools, and compact collapsible **tool chips**, so tool use never hijacks the reply.
+- **Work log** — while the model reasons or runs tools, a live status and timer with the current thought streaming verbatim; expand it to see every thought and tool call in order, so tool use never hijacks the reply.
 - **Model management** — lists the models exposed by `llama-server` (router mode) with size / parameters / context / quantization, **auto-loads** the model you pick, and can **hide** models per server.
 - **Model-generated chat titles**.
 - **Tools** — web search (DuckDuckGo, with result favicons), weather (Open-Meteo), Wikipedia, calculator, date & time, **Python** (run in a self-hosted Piston sandbox), and **file creation** (downloadable). Enable or disable each in **Settings → Tools**.
 - **Per-message stats** like the web UI: model, token count, duration and tokens/second.
-- **Reasoning / thinking** for reasoning models (`--reasoning-format`), with a one-line summary.
+- **Reasoning / thinking** for reasoning models (`--reasoning-format`), shown verbatim.
 - **Multi-server** — add, edit, switch and remove servers with optional API keys and health checks; first-run setup gets you connected.
 - **Sampler controls** — temperature, top-k/p, min-p, penalties, max tokens, seed, stop sequences and system prompt; defaults come from the model and are saved per model.
 - **Conversation management** — search, and long-press to delete.

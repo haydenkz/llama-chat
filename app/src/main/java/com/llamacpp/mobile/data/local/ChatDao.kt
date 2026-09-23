@@ -4,6 +4,7 @@ import androidx.room.Dao
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
+import androidx.room.Transaction
 import androidx.room.Update
 import kotlinx.coroutines.flow.Flow
 
@@ -51,4 +52,19 @@ interface ChatDao {
 
     @Query("DELETE FROM messages WHERE conversationId = :conversationId")
     suspend fun deleteMessages(conversationId: String)
+
+    /** Deletes a conversation and its messages atomically so a kill mid-way cannot orphan rows. */
+    @Transaction
+    suspend fun deleteConversationCascade(id: String) {
+        deleteMessages(id)
+        deleteConversation(id)
+    }
+
+    /** Inserts a message and bumps the conversation's `updatedAt` in one transaction. */
+    @Transaction
+    suspend fun insertMessageAndTouch(message: MessageEntity, now: Long): Long {
+        val rowId = insertMessage(message)
+        touch(message.conversationId, now)
+        return rowId
+    }
 }

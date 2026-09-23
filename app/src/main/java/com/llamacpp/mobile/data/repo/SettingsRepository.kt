@@ -39,12 +39,12 @@ class SettingsRepository(
 
     /** Per-model sampler settings, or null when the user hasn't customized them. */
     fun savedSampler(model: String?): Flow<SamplerSettings?> = dataStore.data.map { prefs ->
-        decodeSamplers(prefs[samplersKey])[model ?: GLOBAL_KEY]
+        (runCatching { decodeOrNull(prefs[samplersKey]) }.getOrNull() ?: emptyMap())[model ?: GLOBAL_KEY]
     }
 
     suspend fun saveSampler(model: String?, settings: SamplerSettings) {
         dataStore.edit { prefs ->
-            val map = decodeSamplers(prefs[samplersKey]).toMutableMap()
+            val map = currentSamplers(prefs) ?: return@edit
             map[model ?: GLOBAL_KEY] = settings
             prefs[samplersKey] = json.encodeToString(map)
         }
@@ -52,7 +52,7 @@ class SettingsRepository(
 
     suspend fun clearSampler(model: String?) {
         dataStore.edit { prefs ->
-            val map = decodeSamplers(prefs[samplersKey]).toMutableMap()
+            val map = currentSamplers(prefs) ?: return@edit
             map.remove(model ?: GLOBAL_KEY)
             prefs[samplersKey] = json.encodeToString(map)
         }
@@ -81,9 +81,16 @@ class SettingsRepository(
         dataStore.edit { it[onboardingKey] = completed }
     }
 
-    private fun decodeSamplers(raw: String?): Map<String, SamplerSettings> =
-        raw?.let { runCatching { json.decodeFromString<Map<String, SamplerSettings>>(it) }.getOrNull() }
-            ?: emptyMap()
+    /** Returns null when the key is absent; throws when present but undecodable. */
+    private fun decodeOrNull(raw: String?): Map<String, SamplerSettings>? =
+        raw?.let { json.decodeFromString<Map<String, SamplerSettings>>(it) }
+
+    /** Mutable copy of the stored samplers, or null when the stored blob is undecodable (mutation must abort). */
+    private fun currentSamplers(prefs: Preferences): MutableMap<String, SamplerSettings>? =
+        runCatching { decodeOrNull(prefs[samplersKey]) }
+            .getOrElse { return null }
+            ?.toMutableMap()
+            ?: mutableMapOf()
 
     companion object {
         const val GLOBAL_KEY = "__global__"

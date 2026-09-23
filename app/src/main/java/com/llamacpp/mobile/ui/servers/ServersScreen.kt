@@ -17,8 +17,10 @@ import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.NetworkCheck
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
@@ -26,9 +28,13 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
@@ -54,6 +60,8 @@ fun ServersScreen(
     val servers by vm.servers.collectAsStateWithLifecycle()
     val active by vm.active.collectAsStateWithLifecycle()
     val health by vm.health.collectAsStateWithLifecycle()
+    val testing by vm.testing.collectAsStateWithLifecycle()
+    var pendingDelete by remember { mutableStateOf<ServerConfig?>(null) }
 
     Scaffold(
         topBar = {
@@ -82,13 +90,35 @@ fun ServersScreen(
                     server = server,
                     isActive = server.id == active?.id,
                     health = health[server.id],
+                    testing = server.id in testing,
                     onSetActive = { vm.setActive(server.id) },
                     onTest = { vm.test(server) },
                     onEdit = { onEdit(server.id) },
-                    onDelete = { vm.delete(server.id) },
+                    onDelete = { pendingDelete = server },
                 )
             }
         }
+    }
+
+    pendingDelete?.let { server ->
+        AlertDialog(
+            onDismissRequest = { pendingDelete = null },
+            title = { Text("Delete server?") },
+            text = {
+                Text("\"${server.name}\" will be removed from this app. Its chats stay in the local database.")
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        vm.delete(server.id)
+                        pendingDelete = null
+                    },
+                ) { Text("Delete") }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingDelete = null }) { Text("Cancel") }
+            },
+        )
     }
 }
 
@@ -97,6 +127,7 @@ private fun ServerCard(
     server: ServerConfig,
     isActive: Boolean,
     health: ServerHealth?,
+    testing: Boolean,
     onSetActive: () -> Unit,
     onTest: () -> Unit,
     onEdit: () -> Unit,
@@ -151,8 +182,12 @@ private fun ServerCard(
             }
             Spacer(Modifier.size(6.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                IconButton(onClick = onTest) {
-                    Icon(Icons.Default.NetworkCheck, "Test connection")
+                IconButton(onClick = onTest, enabled = !testing) {
+                    if (testing) {
+                        CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                    } else {
+                        Icon(Icons.Default.NetworkCheck, "Test connection")
+                    }
                 }
                 IconButton(onClick = onEdit) {
                     Icon(Icons.Default.Edit, "Edit")

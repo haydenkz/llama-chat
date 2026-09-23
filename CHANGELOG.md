@@ -7,6 +7,56 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-09-23
+
+### Added
+
+- **Work log** for each reply: one collapsible section with a live status
+  ("Thinking", "Searching the web", …) and a timer, the current thought streaming
+  in a fixed-height window, and — expanded — every thought and tool call in order.
+- Tool calls appear **while the model is still writing them** (e.g. Python code
+  or a file), with present-tense labels while running.
+- **Suggestion cards** on an empty chat: ready-to-send prompts that use the
+  app's tools (web search, Python, files, Wikipedia); cards for disabled tools
+  are hidden.
+- **Jump to latest** button when scrolled away from the newest message.
+- **Retry** for failed replies, inline and from an error snackbar.
+- Long-press a message to **copy** or **edit** it.
+- Themed (monochrome) launcher icon layer.
+
+### Changed
+
+- New launcher icon: the orange llama.cpp logo.
+- Thoughts are shown **verbatim** — no summaries — and "Thinking" only appears
+  when the model actually reasons or calls a tool; a plain reply shows a small
+  typing indicator and then streams straight into the chat.
+- Updates the model writes between tool calls stay under Thinking instead of
+  flashing into the chat.
+- The thinking timer is accurate and keeps running while tools execute.
+- Scrolling up during generation **stops auto-scroll**; returning to the bottom
+  resumes it.
+- Expanding and collapsing the work log animates smoothly, in step with the text.
+- The composer keeps the keyboard open after sending, keeps your draft across
+  rotation, and shows which chat is generating.
+- Image attachments are downscaled (max 1024 px) off the main thread, up to 4
+  per message.
+
+### Fixed
+
+- **Stop** keeps the partial answer instead of discarding it.
+- Tool calls a server returns as `<tool_call>` text are run as tools instead of
+  shown as raw markup.
+- A tool loop always ends with an answer.
+- Failed requests no longer leave empty assistant messages.
+- Corrupt settings no longer crash the app, and a failed read can no longer wipe
+  saved servers or sampler settings.
+- Deleting a chat or adding a message is atomic; deleting a generating chat
+  stops it first.
+- Network calls cancel promptly; model-list errors are shown in the picker.
+- Servers: delete asks for confirmation, and **Test** shows progress.
+- Tools: the Piston URL field shows the saved value and no longer loses edits.
+- Text fields are no longer hidden behind the keyboard.
+
 ## [0.2.1] - 2026-09-23
 
 ### Fixed

@@ -62,10 +62,7 @@ class ChatRepository(
 
     suspend fun conversation(id: String): Conversation? = dao.getConversation(id)?.toDomain()
 
-    suspend fun deleteConversation(id: String) {
-        dao.deleteMessages(id)
-        dao.deleteConversation(id)
-    }
+    suspend fun deleteConversation(id: String) = dao.deleteConversationCascade(id)
 
     suspend fun setConversationModel(id: String, model: String?) =
         dao.setModel(id, model, System.currentTimeMillis())
@@ -73,11 +70,8 @@ class ChatRepository(
     suspend fun setConversationSystemPrompt(id: String, prompt: String) =
         dao.setSystemPrompt(id, prompt, System.currentTimeMillis())
 
-    suspend fun insertMessage(message: ChatMessage): Long {
-        val rowId = dao.insertMessage(message.toEntity(json))
-        dao.touch(message.conversationId, System.currentTimeMillis())
-        return rowId
-    }
+    suspend fun insertMessage(message: ChatMessage): Long =
+        dao.insertMessageAndTouch(message.toEntity(json), System.currentTimeMillis())
 
     suspend fun updateMessage(message: ChatMessage) = dao.updateMessage(message.toEntity(json))
 
@@ -101,40 +95,7 @@ class ChatRepository(
         tools: List<ToolDto>? = null,
     ): ChatCompletionRequestDto {
         val system = buildSystemPrompt(systemPrompt, toolsEnabled = !tools.isNullOrEmpty())
-
-        val messages = buildList {
-            if (system.isNotBlank()) {
-                add(ChatMessageDto(ChatRole.System.wire, JsonPrimitive(system)))
-            }
-            history.filter { it.role != ChatRole.System }.forEach { message ->
-                when (message.role) {
-                    ChatRole.Tool -> add(
-                        ChatMessageDto(
-                            role = ChatRole.Tool.wire,
-                            content = JsonPrimitive(message.content),
-                            toolCallId = message.toolCallId,
-                            name = message.toolName,
-                        ),
-                    )
-
-                    else -> {
-                        val toolCalls = message.toolCalls
-                        val content = when {
-                            message.images.isNotEmpty() -> contentFor(message)
-                            message.content.isBlank() && toolCalls.isNotEmpty() -> null
-                            else -> JsonPrimitive(message.content)
-                        }
-                        add(
-                            ChatMessageDto(
-                                role = message.role.wire,
-                                content = content,
-                                toolCalls = toolCalls.takeIf { it.isNotEmpty() }?.map { it.toDto() },
-                            ),
-                        )
-                    }
-                }
-            }
-        }
+        val messages = buildRequestMessages(history, system)
         return ChatCompletionRequestDto(
             model = model,
             messages = messages,
@@ -169,40 +130,82 @@ class ChatRepository(
         )
     }
 
-    private fun ToolCall.toDto(): ToolCallDto = ToolCallDto(
-        id = id,
-        type = "function",
-        function = ToolFunctionCallDto(name = name, arguments = arguments),
-    )
-
-    private fun contentFor(message: ChatMessage) =
-        if (message.images.isEmpty()) {
-            JsonPrimitive(message.content)
-        } else {
-            buildJsonArray {
-                if (message.content.isNotBlank()) {
-                    add(
-                        buildJsonObject {
-                            put("type", "text")
-                            put("text", message.content)
-                        },
-                    )
-                }
-                message.images.forEach { uri ->
-                    add(
-                        buildJsonObject {
-                            put("type", "image_url")
-                            putJsonObject("image_url") { put("url", uri) }
-                        },
-                    )
-                }
-            }
-        }
-
     companion object {
         const val DEFAULT_TITLE = "Untitled conversation"
     }
 }
+
+/**
+ * Maps stored history to wire messages. Blank assistant rows without tool calls
+ * (e.g. a failed turn) are dropped: some chat templates reject empty assistant
+ * content, and they carry nothing the model needs.
+ */
+internal fun buildRequestMessages(history: List<ChatMessage>, system: String): List<ChatMessageDto> = buildList {
+    if (system.isNotBlank()) {
+        add(ChatMessageDto(ChatRole.System.wire, JsonPrimitive(system)))
+    }
+    history
+        .filter { it.role != ChatRole.System }
+        .filterNot { it.role == ChatRole.Assistant && it.content.isBlank() && it.toolCalls.isEmpty() }
+        .forEach { message ->
+            when (message.role) {
+                ChatRole.Tool -> add(
+                    ChatMessageDto(
+                        role = ChatRole.Tool.wire,
+                        content = JsonPrimitive(message.content),
+                        toolCallId = message.toolCallId,
+                        name = message.toolName,
+                    ),
+                )
+
+                else -> {
+                    val toolCalls = message.toolCalls
+                    val content = when {
+                        message.images.isNotEmpty() -> contentFor(message)
+                        message.content.isBlank() && toolCalls.isNotEmpty() -> null
+                        else -> JsonPrimitive(message.content)
+                    }
+                    add(
+                        ChatMessageDto(
+                            role = message.role.wire,
+                            content = content,
+                            toolCalls = toolCalls.takeIf { it.isNotEmpty() }?.map { it.toDto() },
+                        ),
+                    )
+                }
+            }
+        }
+}
+
+private fun ToolCall.toDto(): ToolCallDto = ToolCallDto(
+    id = id,
+    type = "function",
+    function = ToolFunctionCallDto(name = name, arguments = arguments),
+)
+
+private fun contentFor(message: ChatMessage) =
+    if (message.images.isEmpty()) {
+        JsonPrimitive(message.content)
+    } else {
+        buildJsonArray {
+            if (message.content.isNotBlank()) {
+                add(
+                    buildJsonObject {
+                        put("type", "text")
+                        put("text", message.content)
+                    },
+                )
+            }
+            message.images.forEach { uri ->
+                add(
+                    buildJsonObject {
+                        put("type", "image_url")
+                        putJsonObject("image_url") { put("url", uri) }
+                    },
+                )
+            }
+        }
+    }
 
 /**
  * When tools are enabled, prepend the current date and time so the model can

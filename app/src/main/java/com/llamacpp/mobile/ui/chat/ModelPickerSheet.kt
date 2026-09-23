@@ -47,6 +47,7 @@ fun ModelPickerList(
     models: List<LlamaModel>,
     selectedId: String?,
     loading: Boolean,
+    error: String? = null,
     onSelect: (String) -> Unit,
     onRefresh: () -> Unit,
     modifier: Modifier = Modifier,
@@ -88,14 +89,15 @@ fun ModelPickerList(
             }
 
             visible.isEmpty() -> {
+                val failed = error != null
                 Text(
-                    text = if (models.isEmpty()) {
-                        "No models available."
-                    } else {
-                        "All models are hidden. Manage them in Servers → edit this server."
+                    text = when {
+                        failed -> "Could not load models: $error"
+                        models.isEmpty() -> "No models available."
+                        else -> "All models are hidden. Manage them in Servers → edit this server."
                     },
                     style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = if (failed) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(horizontal = 20.dp, vertical = 16.dp),
                 )
             }

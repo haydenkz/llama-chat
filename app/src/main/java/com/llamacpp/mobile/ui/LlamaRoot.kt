@@ -12,10 +12,12 @@ import com.llamacpp.mobile.domain.model.ThemeMode
 import com.llamacpp.mobile.ui.navigation.AppNavHost
 import com.llamacpp.mobile.ui.onboarding.OnboardingScreen
 import com.llamacpp.mobile.ui.theme.LlamaChatTheme
+import kotlinx.coroutines.flow.catch
 
 @Composable
 fun LlamaRoot(container: AppContainer) {
     val themeMode by container.settingsRepository.themeMode
+        .catch { emit(ThemeMode.System) }
         .collectAsStateWithLifecycle(initialValue = ThemeMode.System)
 
     val darkTheme = when (themeMode) {
@@ -26,6 +28,7 @@ fun LlamaRoot(container: AppContainer) {
 
     LlamaChatTheme(darkTheme = darkTheme) {
         val onboardingCompleted by container.settingsRepository.onboardingCompleted
+            .catch { emit(false) }
             .collectAsStateWithLifecycle(initialValue = null)
 
         when (onboardingCompleted) {

@@ -1,7 +1,9 @@
 package com.llamacpp.mobile.di
 
 import android.content.Context
+import androidx.datastore.core.handlers.ReplaceFileCorruptionHandler
 import androidx.datastore.preferences.core.PreferenceDataStoreFactory
+import androidx.datastore.preferences.core.emptyPreferences
 import androidx.datastore.preferences.preferencesDataStoreFile
 import androidx.room.Room
 import com.llamacpp.mobile.data.local.AppDatabase
@@ -54,11 +56,15 @@ class AppContainer(context: Context) {
 
     val api: LlamaApi = LlamaApi(plainClient, streamClient, json)
 
+    // A corrupt preferences file is replaced with empty prefs instead of crash-looping
+    // every collector on the first read.
     private val serverDataStore = PreferenceDataStoreFactory.create(
+        corruptionHandler = ReplaceFileCorruptionHandler { emptyPreferences() },
         produceFile = { appContext.preferencesDataStoreFile("servers") },
     )
 
     private val settingsDataStore = PreferenceDataStoreFactory.create(
+        corruptionHandler = ReplaceFileCorruptionHandler { emptyPreferences() },
         produceFile = { appContext.preferencesDataStoreFile("settings") },
     )
 

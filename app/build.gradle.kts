@@ -15,14 +15,19 @@ android {
         applicationId = "com.llamacpp.mobile"
         minSdk = 29
         targetSdk = 37
-        versionCode = 10
-        versionName = "0.2.1"
+        versionCode = 11
+        versionName = "0.3.0"
         vectorDrawables {
             useSupportLibrary = true
         }
     }
 
     buildTypes {
+        debug {
+            // Installs side by side with a store/sideloaded build signed with a
+            // different key, and keeps that build's data untouched.
+            applicationIdSuffix = ".debug"
+        }
         release {
             isMinifyEnabled = false
             // Signed with the standard debug key so release APKs are installable

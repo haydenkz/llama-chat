@@ -1,5 +1,6 @@
 package com.llamacpp.mobile.domain.model
 
+import androidx.compose.runtime.Immutable
 import kotlinx.serialization.Serializable
 
 enum class ChatRole(val wire: String) {
@@ -22,6 +23,8 @@ data class ToolCall(
     val arguments: String,
 )
 
+/** Immutable so Compose can skip bubbles whose message did not change while another streams. */
+@Immutable
 data class ChatMessage(
     val id: Long = 0L,
     val conversationId: String = "",
@@ -42,8 +45,8 @@ data class ChatMessage(
     /** For [ChatRole.Tool] results: the call they answer. */
     val toolCallId: String? = null,
     val toolName: String? = null,
-    /** One-line summary of the model's reasoning for this turn. */
-    val thinkingSummary: String? = null,
+    /** Milliseconds spent thinking (reasoning / tool work) before this message's answer text began. */
+    val thinkingMs: Long? = null,
     val error: String? = null,
 )
 

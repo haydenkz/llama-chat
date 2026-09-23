@@ -12,6 +12,7 @@ import com.llamacpp.mobile.data.remote.dto.UsageDto
 import com.llamacpp.mobile.data.repo.ChatRepository
 import com.llamacpp.mobile.data.repo.ServerRepository
 import com.llamacpp.mobile.data.repo.SettingsRepository
+import com.llamacpp.mobile.data.tools.ToolCallText
 import com.llamacpp.mobile.data.tools.ToolRegistry
 import com.llamacpp.mobile.data.tools.WebSearchTool
 import com.llamacpp.mobile.domain.model.ChatMessage
@@ -22,6 +23,7 @@ import com.llamacpp.mobile.domain.model.SamplerSettings
 import com.llamacpp.mobile.domain.model.ServerConfig
 import com.llamacpp.mobile.domain.model.ToolCall
 import com.llamacpp.mobile.domain.model.samplerSettingsFromParams
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
@@ -29,6 +31,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
@@ -49,6 +52,8 @@ data class ChatUiState(
     val serverOnline: Boolean? = null,
     val models: List<LlamaModel> = emptyList(),
     val loadingModels: Boolean = false,
+    /** Why the last model refresh failed, or null. */
+    val modelsError: String? = null,
     /** Models with an in-flight load/unload request. */
     val pendingModelIds: Set<String> = emptySet(),
     val conversations: List<Conversation> = emptyList(),
@@ -66,6 +71,12 @@ data class ChatUiState(
     val streamingConversationId: String? = null,
     val streamContent: String = "",
     val streamReasoning: String = "",
+    /** Thinking time already accumulated in the current turn (all passes so far). */
+    val streamThinkingMs: Long = 0L,
+    /** When the current thinking span began, or null while answer text is being written. */
+    val streamThinkingSince: Long? = null,
+    /** Tool calls the model is still writing in the current pass (arguments may be partial). */
+    val streamToolCalls: List<ToolCall> = emptyList(),
     val error: String? = null,
     val tokensPerSecond: Double? = null,
     val statusMessage: String? = null,
@@ -94,38 +105,48 @@ class ChatViewModel(
     val state: StateFlow<ChatUiState> = _state.asStateFlow()
 
     private var streamJob: Job? = null
+    private var titleJob: Job? = null
+    private var settingsPersistJob: Job? = null
     private var completionId: String? = null
 
     init {
+        // DataStore/Room flows can throw (corrupt file, I/O); a failure must degrade,
+        // never crash the process from an unguarded collector.
         viewModelScope.launch {
-            serverRepository.activeServer.distinctUntilChanged().collect { server ->
-                _state.update { it.copy(server = server) }
-                refreshModels()
-                refreshHealth()
-            }
+            serverRepository.activeServer.distinctUntilChanged()
+                .catch { emit(_state.value.server ?: ServerRepository.defaultServer()) }
+                .collect { server ->
+                    _state.update { it.copy(server = server) }
+                    refreshModels()
+                    refreshHealth()
+                }
         }
         viewModelScope.launch {
             serverRepository.activeServer.distinctUntilChanged()
-                .flatMapLatest { chatRepository.conversations(it.id) }
+                .flatMapLatest { chatRepository.conversations(it.id).catch { emit(emptyList()) } }
+                .catch { emit(_state.value.conversations) }
                 .collect { list -> _state.update { it.copy(conversations = list) } }
         }
         viewModelScope.launch {
             _state.map { it.selectedId }.distinctUntilChanged()
                 .flatMapLatest { id ->
-                    if (id == null) flowOf(emptyList()) else chatRepository.messages(id)
+                    if (id == null) flowOf(emptyList()) else chatRepository.messages(id).catch { emit(emptyList()) }
                 }
                 .collect { messages -> _state.update { it.copy(messages = messages) } }
         }
         viewModelScope.launch {
             combine(
                 _state.map { it.activeModelId }.distinctUntilChanged(),
-                serverRepository.activeServer.distinctUntilChanged(),
+                serverRepository.activeServer.distinctUntilChanged()
+                    .catch { emit(_state.value.server ?: ServerRepository.defaultServer()) },
             ) { modelId, server -> modelId to server }
                 .collect { (modelId, server) ->
                     // Use the user's saved sampler if any; otherwise seed from the
                     // model's own defaults reported by /props?model=…, so switching
                     // models shows that model's real temperature/top-k/min-p/etc.
-                    val saved = modelId?.let { settingsRepository.savedSampler(it).first() }
+                    val saved = modelId?.let { id ->
+                        runCatching { settingsRepository.savedSampler(id).first() }.getOrNull()
+                    }
                     if (saved != null) {
                         _state.update { it.copy(settings = saved, settingsCustomized = true) }
                     } else {
@@ -142,9 +163,9 @@ class ChatViewModel(
                 }
         }
         viewModelScope.launch {
-            settingsRepository.disabledTools.collect { disabled ->
-                _state.update { it.copy(disabledTools = disabled) }
-            }
+            settingsRepository.disabledTools
+                .catch { emit(_state.value.disabledTools) }
+                .collect { disabled -> _state.update { it.copy(disabledTools = disabled) } }
         }
     }
 
@@ -161,14 +182,16 @@ class ChatViewModel(
     fun refreshModels() {
         viewModelScope.launch {
             _state.update { it.copy(loadingModels = true) }
-            val list = fetchModels()
-            if (list != null) applyModels(list) else _state.update { it.copy(loadingModels = false) }
+            val result = fetchModels()
+            result.onSuccess(::applyModels).onFailure { failure ->
+                _state.update { it.copy(loadingModels = false, modelsError = failure.message ?: "Could not load models") }
+            }
         }
     }
 
-    private suspend fun fetchModels(): List<LlamaModel>? {
-        val server = _state.value.server ?: return null
-        return runCatching { api.models(server) }.getOrNull()
+    private suspend fun fetchModels(): Result<List<LlamaModel>> {
+        val server = _state.value.server ?: return Result.failure(IllegalStateException("No server selected"))
+        return runCatching { api.models(server) }
     }
 
     private fun applyModels(list: List<LlamaModel>) {
@@ -181,6 +204,7 @@ class ChatViewModel(
             current.copy(
                 models = list,
                 loadingModels = false,
+                modelsError = null,
                 selectedModelId = current.selectedModelId ?: fallback,
             )
         }
@@ -220,8 +244,7 @@ class ChatViewModel(
     /** Polls until the server reports the model loaded (or gives up). */
     private suspend fun waitForModelState(id: String) {
         repeat(90) {
-            val list = fetchModels()
-            if (list != null) applyModels(list)
+            fetchModels().getOrNull()?.let(::applyModels)
             if (_state.value.models.firstOrNull { it.id == id }?.isLoaded == true) {
                 _state.update { it.copy(pendingModelIds = it.pendingModelIds - id, statusMessage = null) }
                 return
@@ -259,6 +282,8 @@ class ChatViewModel(
     }
 
     fun deleteConversation(id: String) {
+        // Stop a running generation first so no rows land in a deleted conversation.
+        if (_state.value.streamingConversationId == id) stop()
         viewModelScope.launch {
             chatRepository.deleteConversation(id)
             if (_state.value.selectedId == id) _state.update { it.copy(selectedId = null) }
@@ -287,7 +312,10 @@ class ChatViewModel(
 
     fun updateSettings(settings: SamplerSettings) {
         _state.update { it.copy(settings = settings, settingsCustomized = true) }
-        viewModelScope.launch {
+        // Debounced: sliders and text fields call this per frame/keystroke.
+        settingsPersistJob?.cancel()
+        settingsPersistJob = viewModelScope.launch {
+            delay(SETTINGS_PERSIST_DEBOUNCE_MS)
             settingsRepository.saveSampler(_state.value.activeModelId, settings)
         }
     }
@@ -323,22 +351,20 @@ class ChatViewModel(
 
     fun send(text: String, images: List<String> = emptyList()) {
         if (text.isBlank() && images.isEmpty()) return
-        if (_state.value.isStreaming) return
-
-        streamJob = viewModelScope.launch {
+        launchGeneration(_state.value.selectedId) {
             var conversation = _state.value.conversation
             if (conversation == null) {
-                val serverId = _state.value.server?.id ?: return@launch
+                val serverId = _state.value.server?.id ?: return@launchGeneration null
                 conversation = chatRepository.createConversation(
                     serverId = serverId,
                     model = _state.value.activeModelId ?: defaultModelId(),
                     systemPrompt = _state.value.settings.systemPrompt,
                 )
-                _state.update { it.copy(selectedId = conversation.id) }
+                _state.update { it.copy(selectedId = conversation.id, streamingConversationId = conversation.id) }
             }
             if (_state.value.activeModelId.isNullOrBlank()) {
                 _state.update { it.copy(error = "Select a model before sending.") }
-                return@launch
+                return@launchGeneration null
             }
             chatRepository.insertMessage(
                 ChatMessage(
@@ -349,39 +375,50 @@ class ChatViewModel(
                 ),
             )
             chatRepository.autoTitleFromFirstMessage(conversation.id, text)
-            runCompletion(conversation.id)
+            conversation.id
         }
     }
 
     fun stop() {
+        // Snapshot the id first: cancelling the job clears it.
+        val id = completionId
         streamJob?.cancel()
         val server = _state.value.server
         val model = _state.value.activeModelId
-        val id = completionId
         if (server != null && model != null && id != null) {
-            viewModelScope.launch { api.abort(server, model, id) }
+            viewModelScope.launch { runCatching { api.abort(server, model, id) } }
         }
     }
 
     fun regenerate() {
-        if (_state.value.isStreaming) return
-        val conversation = _state.value.conversation ?: return
-        streamJob = viewModelScope.launch {
+        launchGeneration(_state.value.selectedId) {
+            val conversation = _state.value.conversation ?: return@launchGeneration null
             val lastAssistant = _state.value.messages.lastOrNull { it.role == ChatRole.Assistant }
-                ?: return@launch
+                ?: return@launchGeneration null
             chatRepository.deleteMessagesFrom(conversation.id, lastAssistant.id)
-            runCompletion(conversation.id)
+            conversation.id
         }
     }
 
     fun editMessage(message: ChatMessage, newText: String) {
-        if (_state.value.isStreaming) return
-        streamJob = viewModelScope.launch {
+        launchGeneration(message.conversationId) {
             chatRepository.deleteMessagesFrom(message.conversationId, message.id)
             chatRepository.insertMessage(
                 message.copy(id = 0L, content = newText, error = null, createdAt = System.currentTimeMillis()),
             )
-            runCompletion(message.conversationId)
+            message.conversationId
+        }
+    }
+
+    /** Re-runs the last turn after a failure, dropping a trailing failed assistant row if one was kept. */
+    fun retry() {
+        launchGeneration(_state.value.selectedId) {
+            val conversation = _state.value.conversation ?: return@launchGeneration null
+            val last = _state.value.messages.lastOrNull()
+            if (last != null && last.role == ChatRole.Assistant && last.error != null) {
+                chatRepository.deleteMessage(last.id)
+            }
+            conversation.id
         }
     }
 
@@ -395,10 +432,57 @@ class ChatViewModel(
 
     // ---- internals --------------------------------------------------------
 
+    /** State writes that belong to one conversation must not land while another is selected. */
+    private inline fun updateIfSelected(conversationId: String, block: (ChatUiState) -> ChatUiState) {
+        _state.update { current -> if (current.selectedId == conversationId) block(current) else current }
+    }
+
+    private fun beginStreaming(conversationId: String?) {
+        _state.update { it.copy(isStreaming = true, streamingConversationId = conversationId, error = null) }
+    }
+
+    private fun clearStreaming() {
+        _state.update {
+            it.copy(
+                isStreaming = false,
+                streamingConversationId = null,
+                streamContent = "",
+                streamReasoning = "",
+                streamThinkingMs = 0L,
+                streamThinkingSince = null,
+                streamToolCalls = emptyList(),
+            )
+        }
+    }
+
+    /**
+     * Single entry point for every generation. Marks streaming synchronously (so a
+     * double tap cannot start two generations while `prepare` is still suspended),
+     * then runs `prepare` to resolve the conversation and `runCompletion` on it.
+     * `conversationId` is the conversation the generation is expected to land in,
+     * if known up front; returning null from `prepare` aborts without generating.
+     */
+    private fun launchGeneration(conversationId: String?, prepare: suspend () -> String?) {
+        if (_state.value.isStreaming) return
+        titleJob?.cancel()
+        beginStreaming(conversationId)
+        streamJob = viewModelScope.launch {
+            try {
+                val conversationId = prepare() ?: return@launch
+                runCompletion(conversationId)
+            } catch (t: Throwable) {
+                if (t is CancellationException) throw t
+                _state.update { it.copy(error = t.message) }
+            } finally {
+                clearStreaming()
+            }
+        }
+    }
+
     private suspend fun runCompletion(conversationId: String) {
         val snapshot = _state.value
         val server = snapshot.server ?: return
-        val conversation = snapshot.conversation ?: return
+        val conversation = chatRepository.conversation(conversationId) ?: return
         // Use the live selection, not the conversation record, so switching models
         // takes effect immediately (the DB write may not have landed yet).
         val model = snapshot.activeModelId ?: conversation.model ?: return
@@ -407,6 +491,7 @@ class ChatViewModel(
             .filterNot { it in snapshot.disabledTools }
             .toSet()
         val tools = toolRegistry.definitions(enabledTools).takeIf { it.isNotEmpty() }
+        val systemPrompt = conversation.systemPrompt.ifBlank { snapshot.settings.systemPrompt }
 
         _state.update {
             it.copy(
@@ -414,26 +499,29 @@ class ChatViewModel(
                 streamingConversationId = conversationId,
                 streamContent = "",
                 streamReasoning = "",
-                error = null,
-                tokensPerSecond = null,
+                streamThinkingMs = 0L,
+                streamThinkingSince = null,
+                streamToolCalls = emptyList(),
             )
         }
+        updateIfSelected(conversationId) { it.copy(error = null, tokensPerSecond = null) }
         completionId = null
 
+        // Thinking time is everything between the request and the first answer
+        // token, including tool execution; each pass measures from this cursor.
+        var thinkingCursor = System.currentTimeMillis()
         try {
             var iterations = 0
+            var lastOutcome: StreamOutcome? = null
             while (iterations < MAX_TOOL_ITERATIONS) {
                 iterations++
                 val history = chatRepository.messages(conversationId).first()
                 if (history.isEmpty()) break
-                val request = chatRepository.buildRequest(
-                    model = model,
-                    systemPrompt = conversation.systemPrompt.ifBlank { snapshot.settings.systemPrompt },
-                    history = history,
-                    settings = snapshot.settings,
-                    tools = tools,
-                )
-                val outcome = streamOnce(server, request, model, conversationId)
+                val request = chatRepository.buildRequest(model, systemPrompt, history, snapshot.settings, tools)
+                // After a tool call, the next pass usually narrates before calling again.
+                val outcome = streamOnce(server, request, model, conversationId, thinkingCursor, afterTools = iterations > 1)
+                lastOutcome = outcome
+                thinkingCursor = outcome.endedAt
                 if (outcome.failure != null || outcome.toolCalls.isEmpty()) break
 
                 // Run each requested tool, feed the results back, and continue.
@@ -449,29 +537,34 @@ class ChatViewModel(
                         ),
                     )
                 }
-                _state.update { it.copy(streamContent = "", streamReasoning = "") }
+            }
+            // The cap was hit with tool results still unanswered: one last pass
+            // without tools so the turn ends in an answer. Tool calls the model
+            // still emits as text cannot run here, so they are dropped.
+            if (lastOutcome?.failure == null && lastOutcome?.toolCalls?.isNotEmpty() == true) {
+                val history = chatRepository.messages(conversationId).first()
+                if (history.isNotEmpty()) {
+                    val request = chatRepository.buildRequest(model, systemPrompt, history, snapshot.settings, tools = null)
+                    val outcome = streamOnce(server, request, model, conversationId, thinkingCursor, afterTools = true, acceptTextToolCalls = false)
+                    if (outcome.failure == null && outcome.answered.not()) {
+                        updateIfSelected(conversationId) {
+                            it.copy(error = "Stopped after $MAX_TOOL_ITERATIONS tool calls without a final answer.")
+                        }
+                    }
+                }
             }
         } catch (t: Throwable) {
-            if (t is kotlinx.coroutines.CancellationException) throw t
-            _state.update { it.copy(error = t.message) }
+            if (t is CancellationException) throw t
+            updateIfSelected(conversationId) { it.copy(error = t.message) }
         } finally {
             withContext(NonCancellable) {
-                _state.update {
-                    it.copy(
-                        isStreaming = false,
-                        streamingConversationId = null,
-                        streamContent = "",
-                        streamReasoning = "",
-                    )
-                }
+                clearStreaming()
                 completionId = null
             }
         }
 
         // Name the conversation with the model after the first completed answer.
-        viewModelScope.launch { maybeGenerateTitle(conversationId, server, model) }
-        // Summarize the turn's reasoning for the "Thought for Xs" line.
-        viewModelScope.launch { maybeSummarizeThinking(conversationId, server, model) }
+        titleJob = viewModelScope.launch { maybeGenerateTitle(conversationId, server, model) }
     }
 
     /**
@@ -523,47 +616,7 @@ class ChatViewModel(
             .trim()
 
     /**
-     * Produces a one-line summary of the turn's reasoning and stores it on the
-     * message that carried it, for the "Thought for Xs" line.
-     */
-    private suspend fun maybeSummarizeThinking(conversationId: String, server: ServerConfig, model: String) {
-        val messages = chatRepository.messages(conversationId).first()
-        val target = messages.lastOrNull { it.reasoning.isNotBlank() && it.thinkingSummary == null }
-            ?: return
-        val reasoning = target.reasoning.take(2000)
-
-        val prompt = buildString {
-            append("Summarize what the assistant was figuring out, in ONE short sentence ")
-            append("(max 12 words). Reply with only the summary.\n\n")
-            append(reasoning)
-        }
-        val summary = runCatching {
-            api.chatCompletion(
-                server,
-                ChatCompletionRequestDto(
-                    model = model,
-                    messages = listOf(ChatMessageDto(ChatRole.User.wire, JsonPrimitive(prompt))),
-                    stream = false,
-                    temperature = 0.2f,
-                    maxTokens = 400,
-                    cachePrompt = false,
-                    reasoning = false,
-                ),
-            )
-        }.getOrNull()
-            ?.choices?.firstOrNull()?.message
-            ?.let(::utilityText)
-            ?.let(::sanitizeTitle)
-            ?.takeIf { it.isNotBlank() }
-            ?: reasoning.lineSequence().firstOrNull()?.trim()?.take(120)
-
-        if (!summary.isNullOrBlank()) {
-            chatRepository.updateMessage(target.copy(thinkingSummary = summary))
-        }
-    }
-
-    /**
-     * Text from a utility (title/summary) response. Reasoning models served with
+     * Text from the title response. Reasoning models served with
      * `--reasoning` may put everything in `reasoning_content`; take its last line
      * as the answer in that case.
      */
@@ -584,17 +637,28 @@ class ChatViewModel(
     private class StreamOutcome(
         val toolCalls: List<ToolCall>,
         val failure: String?,
+        /** True when the pass produced visible answer text. */
+        val answered: Boolean,
+        /** When this pass ended; the next pass measures thinking from here. */
+        val endedAt: Long,
     )
 
     /**
      * One streaming pass. Persists the assistant message (including any tool
      * calls) and returns what the model asked for, without touching `isStreaming`.
+     * Cancellation (Stop) persists whatever was generated before rethrowing.
+     * `thinkingSince` is the instant the current thinking span started.
+     * `acceptTextToolCalls` controls whether `<tool_call>` markup found in the
+     * text becomes real calls (false on the final, tool-less pass).
      */
     private suspend fun streamOnce(
         server: ServerConfig,
         request: ChatCompletionRequestDto,
         model: String,
         conversationId: String,
+        thinkingSince: Long,
+        afterTools: Boolean = false,
+        acceptTextToolCalls: Boolean = true,
     ): StreamOutcome {
         val content = StringBuilder()
         val reasoning = StringBuilder()
@@ -602,7 +666,54 @@ class ChatViewModel(
         var timings: TimingsDto? = null
         var usage: UsageDto? = null
         var failure: String? = null
+        var cancelled: CancellationException? = null
         var lastEmit = 0L
+        var thinkingEndedAt: Long? = null
+        // A stale id from a previous tool iteration must not be the one we abort.
+        completionId = null
+        _state.update { it.copy(streamThinkingSince = thinkingSince) }
+
+        fun endThinking(now: Long) {
+            if (thinkingEndedAt != null) return
+            thinkingEndedAt = now
+            _state.update {
+                it.copy(streamThinkingMs = it.streamThinkingMs + (now - thinkingSince), streamThinkingSince = null)
+            }
+        }
+
+        // Text that turned out to precede a tool call was narration, not the answer:
+        // reopen the thinking span so the clock covers it.
+        fun resumeThinking() {
+            val ended = thinkingEndedAt ?: return
+            thinkingEndedAt = null
+            _state.update {
+                it.copy(streamThinkingMs = it.streamThinkingMs - (ended - thinkingSince), streamThinkingSince = thinkingSince)
+            }
+        }
+
+        // A first pass streams text straight into the answer area; if a tool call
+        // follows, it was narration and moves under Thinking. After a tool call,
+        // text streams live in the work area instead (narration is likely there)
+        // and moves to the answer once it clearly is one: a line break or a
+        // paragraph's worth of text.
+        var promoted = !afterTools
+
+        fun pendingToolCalls(): List<ToolCall> =
+            toolAcc.entries.filter { it.value.name.isNotBlank() }.map { (index, acc) ->
+                ToolCall(id = acc.id.ifBlank { "pending-$index" }, name = acc.name, arguments = acc.arguments.toString())
+            }
+
+        fun flush(visible: String, answering: Boolean) {
+            val think = reasoning.toString()
+            val tools = pendingToolCalls()
+            _state.update {
+                it.copy(
+                    streamContent = if (answering) visible else "",
+                    streamReasoning = if (answering) think else joinNonBlank(think, visible),
+                    streamToolCalls = tools,
+                )
+            }
+        }
 
         try {
             api.streamChat(server, request).collect { event ->
@@ -613,7 +724,10 @@ class ChatViewModel(
                             delta.content?.let { content.append(it) }
                             delta.reasoningContent?.let { reasoning.append(it) }
                             delta.toolCalls?.forEach { tc ->
-                                val index = tc.index ?: 0
+                                // Without an index, match by id; otherwise it is a new call.
+                                val index = tc.index
+                                    ?: toolAcc.entries.firstOrNull { tc.id != null && it.value.id == tc.id }?.key
+                                    ?: toolAcc.size
                                 val acc = toolAcc.getOrPut(index) { ToolCallAccumulator() }
                                 if (!tc.id.isNullOrBlank()) acc.id = tc.id
                                 tc.function?.name?.takeIf { it.isNotBlank() }?.let { acc.name = it }
@@ -624,25 +738,39 @@ class ChatViewModel(
                         event.chunk.usage?.let { usage = it }
 
                         val now = System.currentTimeMillis()
-                        if (now - lastEmit >= 30) {
+                        // Each emit reparses the whole markdown document in the UI, so
+                        // back off as the answer grows.
+                        val interval = when {
+                            content.length < 4_000 -> 30L
+                            content.length < 16_000 -> 90L
+                            else -> 150L
+                        }
+                        if (now - lastEmit >= interval) {
                             lastEmit = now
-                            _state.update {
-                                it.copy(
-                                    streamContent = content.toString(),
-                                    streamReasoning = reasoning.toString(),
-                                )
-                            }
+                            val raw = content.toString()
+                            // Tool-call markup arriving as text is not answer content.
+                            val visible = ToolCallText.strip(raw)
+                            val toolSignal = toolAcc.isNotEmpty() || ToolCallText.hasMarkup(raw)
+                            if (!promoted && !toolSignal && looksLikeAnswer(visible)) promoted = true
+                            val answering = promoted && !toolSignal && visible.isNotBlank()
+                            if (answering) endThinking(now) else if (toolSignal) resumeThinking()
+                            flush(visible, answering)
                         }
                     }
                     is ChatStreamEvent.Failed -> failure = event.message
                 }
             }
         } catch (t: Throwable) {
-            if (t is kotlinx.coroutines.CancellationException) throw t
-            failure = t.message
+            if (t is CancellationException) cancelled = t else failure = t.message
         }
+        val endedAt = System.currentTimeMillis()
+        // Servers that miss the model's tool-call format hand it back as text.
+        val extracted = ToolCallText.extract(content.toString())
+        val toolPass = toolAcc.isNotEmpty() || (acceptTextToolCalls && extracted.toolCalls.isNotEmpty())
+        if (toolPass) resumeThinking()
+        endThinking(endedAt)
 
-        val text = content.toString()
+        val text = extracted.content
         val think = reasoning.toString()
         val toolCalls = toolAcc.values.mapNotNull { acc ->
             if (acc.name.isBlank()) {
@@ -654,9 +782,10 @@ class ChatViewModel(
                     arguments = acc.arguments.toString(),
                 )
             }
-        }
+        }.ifEmpty { if (acceptTextToolCalls) extracted.toolCalls else emptyList() }
         val speed = timings?.predictedPerSecond
-        val assistant = if (text.isNotBlank() || think.isNotBlank() || toolCalls.isNotEmpty() || failure != null) {
+        // A pure failure produces no row: it surfaces through `error` instead.
+        val assistant = if (text.isNotBlank() || think.isNotBlank() || toolCalls.isNotEmpty()) {
             ChatMessage(
                 conversationId = conversationId,
                 role = ChatRole.Assistant,
@@ -668,25 +797,51 @@ class ChatViewModel(
                 promptTokenCount = usage?.promptTokens ?: timings?.promptN,
                 tokensPerSecond = speed,
                 toolCalls = toolCalls,
+                thinkingMs = (thinkingEndedAt ?: endedAt) - thinkingSince,
                 error = failure,
             )
         } else {
             null
         }
 
-        val rowId = assistant?.let { chatRepository.insertMessage(it) }
+        val rowId = assistant?.let { withContext(NonCancellable) { chatRepository.insertMessage(it) } }
+        // One atomic swap from the live buffers to the persisted row, so the pass is
+        // never shown twice (or not at all) for a frame. A tool pass keeps the clock
+        // running: tool execution counts as thinking.
         _state.update { current ->
+            val cleared = current.copy(
+                streamContent = "",
+                streamReasoning = "",
+                streamToolCalls = emptyList(),
+                streamThinkingSince = if (toolPass && cancelled == null) endedAt else null,
+            )
+            if (current.selectedId != conversationId) return@update cleared
             val messages = if (assistant != null && rowId != null && current.messages.none { it.id == rowId }) {
                 current.messages + assistant.copy(id = rowId)
             } else {
                 current.messages
             }
-            current.copy(messages = messages, error = failure, tokensPerSecond = speed)
+            cleared.copy(
+                messages = messages,
+                // A persisted row shows its error inline; only a row-less failure needs the transient banner.
+                error = failure.takeIf { assistant == null },
+                tokensPerSecond = speed,
+            )
         }
-        return StreamOutcome(toolCalls, failure)
+        cancelled?.let { throw it }
+        return StreamOutcome(toolCalls, failure, answered = text.isNotBlank(), endedAt = endedAt)
     }
 
     private suspend fun executeTool(call: ToolCall): String = toolRegistry.execute(call)
+
+    private fun joinNonBlank(vararg parts: String): String = parts.filter(String::isNotBlank).joinToString("\n\n")
+
+    /** Updates between tool calls are single-line prose; an answer soon breaks a line or runs long. */
+    private fun looksLikeAnswer(text: String): Boolean {
+        val trimmed = text.trim()
+        return trimmed.contains('\n') || trimmed.length >= ANSWER_PROMOTE_CHARS
+    }
+
 
     private fun queryOf(call: ToolCall): String =
         runCatching {
@@ -698,6 +853,10 @@ class ChatViewModel(
             ?: _state.value.models.firstOrNull()?.id
 
     companion object {
-        private const val MAX_TOOL_ITERATIONS = 4
+        /** Passes with tools before forcing a tool-less answer; multi-step requests need several. */
+        private const val MAX_TOOL_ITERATIONS = 12
+        private const val SETTINGS_PERSIST_DEBOUNCE_MS = 400L
+        /** Text after a tool call moves from the work area to the answer at this length. */
+        private const val ANSWER_PROMOTE_CHARS = 400
     }
 }

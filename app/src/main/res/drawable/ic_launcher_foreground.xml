@@ -3,32 +3,18 @@
     android:height="108dp"
     android:viewportWidth="512"
     android:viewportHeight="512">
-    <!-- Official llama.cpp logo (black), inset into the adaptive-icon safe zone. -->
+    <!--
+        llama.cpp logo (orange), from selfh.st/icons, scaled into the 66dp
+        adaptive-icon safe zone. Also used as the monochrome (themed) layer.
+    -->
     <group
-        android:translateX="102.4"
-        android:translateY="102.4"
-        android:scaleX="0.6"
-        android:scaleY="0.6">
-        <group
-            android:translateX="10.24"
-            android:translateY="10.24"
-            android:scaleX="0.96"
-            android:scaleY="0.96">
-            <path
-                android:fillColor="#111111"
-                android:pathData="M244.95 8C215.233 8 187.774 23.8591 172.923 49.5999L95.6009 183.625C60.2162 244.959 104.481 321.6 175.29 321.6H208L316.977 132.708C348.959 77.2719 308.95 8 244.95 8ZM208 321.6H351.947C415.982 321.6 456.013 390.91 424.013 446.377C409.155 472.132 381.681 488 351.947 488H271.29C200.481 488 156.216 411.359 191.601 350.026L208 321.6Z" />
-            <path
-                android:fillColor="#111111"
-                android:pathData="M208 321.6H16L106.462 164.8L208 321.6Z" />
-            <path
-                android:fillColor="#111111"
-                android:pathData="M388.923 8L208 321.6L253.6 8H388.923Z" />
-            <path
-                android:fillColor="#111111"
-                android:pathData="M304 488H112L202.462 331.2L304 488Z" />
-            <path
-                android:fillColor="#111111"
-                android:pathData="M496 321.6H208L419.399 454.4L496 321.6Z" />
-        </group>
+        android:pivotX="256"
+        android:pivotY="256"
+        android:scaleX="0.54"
+        android:scaleY="0.54"
+        android:translateX="8">
+        <path
+            android:fillColor="#FF8236"
+            android:pathData="m356.4 201.3-32.8 58.3c-43.3-33.3-107.4-38.2-150.7-2.4-69.8 57.6-64.9 190.8 43.7 191.6 30.4 0 56.2-14.3 83.9-23.8l14.6 58.1c-24.6 11.4-49.6 23.1-76.6 26.7-246 33.5-231.9-321.6-9.5-340.1 46.7-3.9 87.8 8.3 127.6 31.6zm-169.9-55.9c-37.4 11.2-72.2 31.8-98.5 60.8-4.9-58.8 8.3-177.7 73.7-201 9.7-3.4 43-11.9 42.1 5.3-1 17.3-24.1 46.9-29.7 63-9.7 28.2-.7 47.6 12.6 72.2zm92.4 252.8h-36.5v-41.3h-41.3v-34h37.7l3.6-3.6v-40.1h36.5V323h38.9v34h-38.9zm133.7-41.3v41.3h-36.5v-41.3h-38.9v-34h38.9v-43.8h36.5v40.1l3.6 3.6h37.7v34h-41.3zM305.4 31.4c4.9 7.3-22.6 38.7-27 46.7-12.6 23.8-4.1 37.4 5.3 60-27.5-4.1-53-.7-80.2 2.4C209.6 88.3 239 12.2 305.4 31.4" />
     </group>
 </vector>

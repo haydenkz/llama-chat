@@ -10,6 +10,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
@@ -21,14 +22,20 @@ class ServersViewModel(
 ) : ViewModel() {
 
     val servers: StateFlow<List<ServerConfig>> = repository.servers
+        .catch { emit(emptyList()) }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     val active: StateFlow<ServerConfig?> = repository.activeServer
         .map<ServerConfig, ServerConfig?> { it }
+        .catch { emit(null) }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
     private val _health = MutableStateFlow<Map<String, ServerHealth>>(emptyMap())
     val health: StateFlow<Map<String, ServerHealth>> = _health.asStateFlow()
+
+    /** Ids of servers with a connection test in flight. */
+    private val _testing = MutableStateFlow(emptySet<String>())
+    val testing: StateFlow<Set<String>> = _testing.asStateFlow()
 
     fun save(server: ServerConfig) {
         viewModelScope.launch { repository.upsert(server) }
@@ -43,8 +50,14 @@ class ServersViewModel(
     }
 
     fun test(server: ServerConfig) {
+        if (server.id in _testing.value) return
         viewModelScope.launch {
-            _health.update { it + (server.id to api.health(server)) }
+            _testing.update { it + server.id }
+            try {
+                _health.update { it + (server.id to api.health(server)) }
+            } finally {
+                _testing.update { it - server.id }
+            }
         }
     }
 }

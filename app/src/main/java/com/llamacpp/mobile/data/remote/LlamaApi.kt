@@ -20,11 +20,10 @@ import com.llamacpp.mobile.domain.model.LlamaModel
 import com.llamacpp.mobile.domain.model.ServerConfig
 import com.llamacpp.mobile.domain.model.ServerHealth
 import com.llamacpp.mobile.domain.model.ServerProps
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
-import kotlinx.coroutines.withContext
+import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonPrimitive
@@ -39,6 +38,7 @@ import okhttp3.Response
 import okhttp3.sse.EventSource
 import okhttp3.sse.EventSourceListener
 import okhttp3.sse.EventSources
+import java.io.IOException
 
 class ApiException(val statusCode: Int, override val message: String) : Exception(message)
 
@@ -73,14 +73,25 @@ class LlamaApi(
     private inline fun <reified T> bodyJson(value: T): okhttp3.RequestBody =
         json.encodeToString(value).toRequestBody(jsonMedia)
 
+    /** Enqueues the call so coroutine cancellation cancels the request instead of blocking an IO thread. */
     private suspend fun executeRaw(
         request: Request,
         client: OkHttpClient = plainClient,
-    ): Pair<Int, String> = withContext(Dispatchers.IO) {
-        val response = client.newCall(request).execute()
-        response.use {
-            Pair(it.code, it.body.string())
-        }
+    ): Pair<Int, String> = suspendCancellableCoroutine { cont ->
+        val call = client.newCall(request)
+        cont.invokeOnCancellation { call.cancel() }
+        call.enqueue(
+            object : okhttp3.Callback {
+                override fun onFailure(call: okhttp3.Call, e: IOException) {
+                    cont.resumeWith(Result.failure(e))
+                }
+
+                override fun onResponse(call: okhttp3.Call, response: Response) {
+                    val result = runCatching { response.use { it.code to it.body.string() } }
+                    cont.resumeWith(result)
+                }
+            },
+        )
     }
 
     private suspend fun executeText(request: Request): String {

@@ -10,6 +10,7 @@ import com.llamacpp.mobile.domain.model.ServerProps
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.Json
@@ -40,7 +41,7 @@ class ServerInfoViewModel(
 
     init {
         viewModelScope.launch {
-            serverRepository.activeServer.collect { server ->
+            serverRepository.activeServer.catch { emit(ServerRepository.defaultServer()) }.collect { server ->
                 _state.update { it.copy(server = server) }
                 refresh()
             }
