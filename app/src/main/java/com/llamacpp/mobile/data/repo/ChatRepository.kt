@@ -21,7 +21,12 @@ import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonObject
+import java.time.ZonedDateTime
+import java.time.format.DateTimeFormatter
 import java.util.UUID
+
+private val dateTimeFormat: DateTimeFormatter =
+    DateTimeFormatter.ofPattern("EEEE, d MMMM yyyy, HH:mm z")
 
 class ChatRepository(
     private val dao: ChatDao,
@@ -93,9 +98,11 @@ class ChatRepository(
         settings: SamplerSettings,
         tools: List<ToolDto>? = null,
     ): ChatCompletionRequestDto {
+        val system = buildSystemPrompt(systemPrompt, toolsEnabled = !tools.isNullOrEmpty())
+
         val messages = buildList {
-            if (systemPrompt.isNotBlank()) {
-                add(ChatMessageDto(ChatRole.System.wire, JsonPrimitive(systemPrompt)))
+            if (system.isNotBlank()) {
+                add(ChatMessageDto(ChatRole.System.wire, JsonPrimitive(system)))
             }
             history.filter { it.role != ChatRole.System }.forEach { message ->
                 when (message.role) {
@@ -194,3 +201,17 @@ class ChatRepository(
         const val DEFAULT_TITLE = "Untitled conversation"
     }
 }
+
+/**
+ * When tools are enabled, prepend the current date and time so the model can
+ * interpret relative wording ("today", "latest", "last week") — essential for
+ * answering things like "who won the last F1 race" after a web search.
+ */
+internal fun buildSystemPrompt(systemPrompt: String, toolsEnabled: Boolean): String = buildString {
+    if (toolsEnabled) {
+        append("Current date and time: ")
+            .append(ZonedDateTime.now().format(dateTimeFormat))
+            .append(". Use this to interpret relative dates such as \"today\", \"latest\" or \"last week\".\n\n")
+    }
+    append(systemPrompt)
+}.trim()

@@ -44,7 +44,9 @@ class WebSearchTool(private val client: OkHttpClient) : ChatTool {
                 "No web results found for \"$query\"."
             } else {
                 buildString {
-                    append("Web results for \"").append(query).append("\":\n\n")
+                    append("Web results for \"").append(query).append("\" (searched ")
+                        .append(java.time.LocalDate.now().format(searchDateFormat))
+                        .append("):\n\n")
                     results.forEachIndexed { index, result ->
                         append(index + 1).append(". ").append(result.title).append('\n')
                         append(result.url).append('\n')
@@ -105,3 +107,6 @@ class WebSearchTool(private val client: OkHttpClient) : ChatTool {
         const val NAME = "web_search"
     }
 }
+
+private val searchDateFormat: java.time.format.DateTimeFormatter =
+    java.time.format.DateTimeFormatter.ofPattern("EEEE, d MMMM yyyy")
