@@ -91,6 +91,7 @@ import com.llamacpp.mobile.domain.model.ChatMessage
 import com.llamacpp.mobile.domain.model.ChatRole
 import com.llamacpp.mobile.domain.model.ToolCall
 import com.llamacpp.mobile.ui.appVmFactory
+import com.llamacpp.mobile.ui.components.LocalNetworkPermissionEffect
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -133,6 +134,12 @@ fun ChatScreen(
         )
         if (result == SnackbarResult.ActionPerformed) vm.retry()
         vm.dismissError()
+    }
+
+    // Android 17+ blocks LAN servers until "Nearby devices" is granted.
+    LocalNetworkPermissionEffect(state.server?.baseUrl) {
+        vm.refreshHealth()
+        vm.refreshModels()
     }
 
     // Re-check reachability whenever the app comes back to the foreground.

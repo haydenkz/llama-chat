@@ -8,6 +8,7 @@ import androidx.datastore.preferences.preferencesDataStoreFile
 import androidx.room.Room
 import com.llamacpp.mobile.data.local.AppDatabase
 import com.llamacpp.mobile.data.remote.LlamaApi
+import com.llamacpp.mobile.data.remote.LocalNetworkErrorInterceptor
 import com.llamacpp.mobile.data.repo.ChatRepository
 import com.llamacpp.mobile.data.repo.ServerRepository
 import com.llamacpp.mobile.data.repo.SettingsRepository
@@ -41,7 +42,10 @@ class AppContainer(context: Context) {
         coerceInputValues = true
     }
 
+    private val localNetworkErrors = LocalNetworkErrorInterceptor(appContext)
+
     private val plainClient: OkHttpClient = OkHttpClient.Builder()
+        .addInterceptor(localNetworkErrors)
         .connectTimeout(20, TimeUnit.SECONDS)
         .readTimeout(120, TimeUnit.SECONDS)
         .writeTimeout(60, TimeUnit.SECONDS)
@@ -49,6 +53,7 @@ class AppContainer(context: Context) {
 
     /** No read timeout: generations may stream for minutes. */
     private val streamClient: OkHttpClient = OkHttpClient.Builder()
+        .addInterceptor(localNetworkErrors)
         .connectTimeout(20, TimeUnit.SECONDS)
         .readTimeout(0, TimeUnit.SECONDS)
         .writeTimeout(60, TimeUnit.SECONDS)
@@ -73,6 +78,7 @@ class AppContainer(context: Context) {
 
     /** Dedicated client for network tools (browser UA, follows redirects). */
     private val toolClient = OkHttpClient.Builder()
+        .addInterceptor(localNetworkErrors)
         .connectTimeout(20, TimeUnit.SECONDS)
         .readTimeout(30, TimeUnit.SECONDS)
         .followRedirects(true)
