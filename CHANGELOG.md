@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-09-28
+
+### Fixed
+
+- **Can't connect to a server on the local network on Android 17** (#2). Android
+  17 blocks LAN connections unless the app has the "Nearby devices" (local
+  network) permission; without it, connecting timed out after 20 seconds. The
+  app now asks for this permission when your server is on your local network
+  (during setup, and on launch for an existing server) and reconnects once
+  it's granted. If the permission is denied, the error now explains how to
+  enable it instead of showing a raw timeout.
+
 ## [0.3.0] - 2026-09-23
 
 ### Added
@@ -198,7 +210,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Subtle haptics while generating (toggleable).
 - GitHub Actions CI and tag-based release workflow.
 
-[Unreleased]: https://github.com/haydenkz/llama-chat/compare/v0.2.1...HEAD
+[Unreleased]: https://github.com/haydenkz/llama-chat/compare/v0.3.1...HEAD
+[0.3.1]: https://github.com/haydenkz/llama-chat/releases/tag/v0.3.1
+[0.3.0]: https://github.com/haydenkz/llama-chat/releases/tag/v0.3.0
 [0.2.1]: https://github.com/haydenkz/llama-chat/releases/tag/v0.2.1
 [0.2.0]: https://github.com/haydenkz/llama-chat/releases/tag/v0.2.0
 [0.1.7]: https://github.com/haydenkz/llama-chat/releases/tag/v0.1.7
