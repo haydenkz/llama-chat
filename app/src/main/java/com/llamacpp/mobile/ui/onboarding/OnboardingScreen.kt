@@ -42,6 +42,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.llamacpp.mobile.di.AppContainer
 import com.llamacpp.mobile.ui.appVmFactory
 import com.llamacpp.mobile.ui.chat.ModelPickerList
+import com.llamacpp.mobile.ui.components.rememberLocalNetworkGate
 
 @Composable
 fun OnboardingScreen(container: AppContainer) {
@@ -50,6 +51,7 @@ fun OnboardingScreen(container: AppContainer) {
             OnboardingViewModel(it.serverRepository, it.settingsRepository, it.api)
         },
     )
+    val localNetworkGate = rememberLocalNetworkGate()
 
     Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
         Column(
@@ -64,7 +66,7 @@ fun OnboardingScreen(container: AppContainer) {
             Box(Modifier.weight(1f).fillMaxWidth().padding(vertical = 20.dp)) {
                 when (vm.step) {
                     OnboardingStep.Welcome -> WelcomeStep()
-                    OnboardingStep.Server -> ServerStep(vm)
+                    OnboardingStep.Server -> ServerStep(vm, localNetworkGate)
                     OnboardingStep.Model -> ModelStep(vm)
                 }
             }
@@ -80,7 +82,7 @@ fun OnboardingScreen(container: AppContainer) {
                     TextButton(onClick = vm::back) { Text("Back") }
                     Spacer(Modifier.weight(1f))
                     Button(
-                        onClick = vm::goToModels,
+                        onClick = { localNetworkGate(vm.serverUrl, vm::goToModels) },
                         enabled = vm.serverUrl.isNotBlank(),
                     ) { Text("Continue") }
                 }
@@ -148,7 +150,10 @@ private fun WelcomeStep() {
 }
 
 @Composable
-private fun ServerStep(vm: OnboardingViewModel) {
+private fun ServerStep(
+    vm: OnboardingViewModel,
+    localNetworkGate: (baseUrl: String, action: () -> Unit) -> Unit,
+) {
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
         Text("Connect your server", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
         Spacer(Modifier.height(8.dp))
@@ -194,7 +199,7 @@ private fun ServerStep(vm: OnboardingViewModel) {
         Spacer(Modifier.height(16.dp))
         Row(verticalAlignment = Alignment.CenterVertically) {
             OutlinedButton(
-                onClick = vm::testConnection,
+                onClick = { localNetworkGate(vm.serverUrl, vm::testConnection) },
                 enabled = !vm.testing && vm.serverUrl.isNotBlank(),
             ) { Text("Test connection") }
             Spacer(Modifier.width(12.dp))
