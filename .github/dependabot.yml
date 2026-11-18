@@ -1,0 +1,40 @@
+version: 2
+updates:
+  # Version catalog (gradle/libs.versions.toml), the buildscript classpath in
+  # build.gradle.kts, and the Gradle wrapper.
+  - package-ecosystem: "gradle"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    groups:
+      # The Compose compiler and serialization plugins share the Kotlin
+      # version, and the buildscript pins kotlin-gradle-plugin separately, so
+      # they have to move together. KSP is kept with them.
+      kotlin:
+        patterns:
+          - "org.jetbrains.kotlin:*"
+          - "org.jetbrains.kotlin.*"
+          - "com.google.devtools.ksp*"
+      androidx:
+        patterns:
+          - "androidx.*"
+      # Remaining libraries, minor and patch only. AGP and the Gradle wrapper
+      # are left out so each lands in its own PR.
+      libraries:
+        patterns:
+          - "*"
+        exclude-patterns:
+          - "com.android.*"
+          - "gradle-wrapper"
+        update-types:
+          - "minor"
+          - "patch"
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    groups:
+      actions:
+        patterns:
+          - "*"
