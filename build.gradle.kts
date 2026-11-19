@@ -6,7 +6,7 @@ buildscript {
     dependencies {
         // AGP 9 ships built-in Kotlin (KGP 2.2.x). Bump KGP to match the
         // Kotlin/Compose/KSP versions declared in the version catalog.
-        classpath("org.jetbrains.kotlin:kotlin-gradle-plugin:2.3.10")
+        classpath("org.jetbrains.kotlin:kotlin-gradle-plugin:2.4.21")
     }
 }
 
